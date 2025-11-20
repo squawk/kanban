@@ -2,6 +2,7 @@ export interface KanbanCard {
   id: string;
   title: string;
   notes: string;
+  generatedPrompt?: string;
   createdAt: string;
   updatedAt: string;
 }
