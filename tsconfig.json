@@ -17,7 +17,8 @@
     "paths": {
       "~/*": ["./app/*"]
     },
-    "noEmit": true
+    "noEmit": true,
+    "rootDirs": [".", "./.react-router/types"]
   },
-  "include": ["app/**/*", "react-router.config.ts"]
+  "include": ["app/**/*", "react-router.config.ts", ".react-router/types/**/*"]
 }
