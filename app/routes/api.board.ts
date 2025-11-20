@@ -12,7 +12,15 @@ export async function loader() {
             position: "asc",
           },
         },
-        cards: true,
+        cards: {
+          include: {
+            comments: {
+              orderBy: {
+                createdAt: "asc",
+              },
+            },
+          },
+        },
       },
     });
 
@@ -32,12 +40,19 @@ export async function loader() {
           ? col.cardIds
           : JSON.parse(col.cardIds as string),
       })),
-      cards: board.cards.reduce((acc, card) => {
+      cards: board.cards.reduce((acc, card: any) => {
         acc[card.id] = {
           id: card.id,
           title: card.title,
           notes: card.notes,
           generatedPrompt: card.generatedPrompt || undefined,
+          comments: card.comments.map((comment: any) => ({
+            id: comment.id,
+            content: comment.content,
+            cardId: comment.cardId,
+            createdAt: comment.createdAt.toISOString(),
+            updatedAt: comment.updatedAt.toISOString(),
+          })),
           createdAt: card.createdAt.toISOString(),
           updatedAt: card.updatedAt.toISOString(),
         };

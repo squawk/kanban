@@ -457,6 +457,7 @@ export function KanbanBoard() {
         onSave={handleSaveCard}
         initialTitle={editingCard?.title}
         initialNotes={editingCard?.notes}
+        cardId={editingCard?.id}
       />
 
       <ColumnDialog

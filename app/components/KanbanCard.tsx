@@ -2,6 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { KanbanCard as KanbanCardType } from "~/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { MessageSquare } from "lucide-react";
 
 interface KanbanCardProps {
   card: KanbanCardType;
@@ -120,13 +121,19 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
             </div>
           </div>
         </CardHeader>
-        {card.notes && (
-          <CardContent className="pt-0">
+        <CardContent className="pt-0 space-y-2">
+          {card.notes && (
             <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-3">
               {card.notes}
             </p>
-          </CardContent>
-        )}
+          )}
+          {card.comments && card.comments.length > 0 && (
+            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+              <MessageSquare className="h-3 w-3" />
+              <span>{card.comments.length} {card.comments.length === 1 ? 'comment' : 'comments'}</span>
+            </div>
+          )}
+        </CardContent>
       </Card>
     </div>
   );
