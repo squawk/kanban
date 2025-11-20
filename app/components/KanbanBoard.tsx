@@ -21,10 +21,10 @@ import {
   KanbanColumn as KanbanColumnType,
   KanbanBoard as KanbanBoardType,
 } from "~/lib/types";
-import { getInitialBoard, saveBoard, generateId } from "~/lib/storage";
 
 export function KanbanBoard() {
-  const [board, setBoard] = useState<KanbanBoardType>(getInitialBoard());
+  const [board, setBoard] = useState<KanbanBoardType>({ columns: [], cards: {} });
+  const [loading, setLoading] = useState(true);
   const [activeCard, setActiveCard] = useState<KanbanCardType | null>(null);
   const [isCardDialogOpen, setIsCardDialogOpen] = useState(false);
   const [isColumnDialogOpen, setIsColumnDialogOpen] = useState(false);
@@ -45,9 +45,26 @@ export function KanbanBoard() {
     })
   );
 
+  // Load board from database on mount
   useEffect(() => {
-    saveBoard(board);
-  }, [board]);
+    fetchBoard();
+  }, []);
+
+  const fetchBoard = async () => {
+    try {
+      const response = await fetch("/api/board");
+      if (response.ok) {
+        const data = await response.json();
+        setBoard(data);
+      } else {
+        console.error("Failed to fetch board");
+      }
+    } catch (error) {
+      console.error("Error fetching board:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
@@ -55,7 +72,7 @@ export function KanbanBoard() {
     setActiveCard(card);
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveCard(null);
 
@@ -74,47 +91,67 @@ export function KanbanBoard() {
 
     if (!activeColumn || !overColumn) return;
 
+    let newColumns = board.columns;
+
     if (activeColumn.id === overColumn.id) {
       // Reordering within the same column
       const oldIndex = activeColumn.cardIds.indexOf(activeId);
       const newIndex = activeColumn.cardIds.indexOf(overId);
 
       if (oldIndex !== newIndex) {
+        newColumns = board.columns.map((col) =>
+          col.id === activeColumn.id
+            ? {
+                ...col,
+                cardIds: arrayMove(col.cardIds, oldIndex, newIndex),
+              }
+            : col
+        );
+
         setBoard((prev) => ({
           ...prev,
-          columns: prev.columns.map((col) =>
-            col.id === activeColumn.id
-              ? {
-                  ...col,
-                  cardIds: arrayMove(col.cardIds, oldIndex, newIndex),
-                }
-              : col
-          ),
+          columns: newColumns,
         }));
+
+        // Save to database
+        await fetch("/api/board", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ columns: newColumns }),
+        });
       }
     } else {
       // Moving to a different column
+      newColumns = board.columns.map((col) => {
+        if (col.id === activeColumn.id) {
+          return {
+            ...col,
+            cardIds: col.cardIds.filter((id) => id !== activeId),
+          };
+        }
+        if (col.id === overColumn.id) {
+          const newCardIds = [...col.cardIds];
+          const insertIndex = overId === col.id ? newCardIds.length : newCardIds.indexOf(overId);
+          newCardIds.splice(insertIndex, 0, activeId);
+          return {
+            ...col,
+            cardIds: newCardIds,
+          };
+        }
+        return col;
+      });
+
       setBoard((prev) => ({
         ...prev,
-        columns: prev.columns.map((col) => {
-          if (col.id === activeColumn.id) {
-            return {
-              ...col,
-              cardIds: col.cardIds.filter((id) => id !== activeId),
-            };
-          }
-          if (col.id === overColumn.id) {
-            const newCardIds = [...col.cardIds];
-            const insertIndex = overId === col.id ? newCardIds.length : newCardIds.indexOf(overId);
-            newCardIds.splice(insertIndex, 0, activeId);
-            return {
-              ...col,
-              cardIds: newCardIds,
-            };
-          }
-          return col;
-        }),
+        columns: newColumns,
       }));
+
+      // Save to database
+      await fetch("/api/board", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columns: newColumns }),
+      });
 
       // Trigger confetti if card is moved to completed column
       if (overColumn.id === "completed" && activeColumn.id !== "completed") {
@@ -140,43 +177,53 @@ export function KanbanBoard() {
     setIsCardDialogOpen(true);
   };
 
-  const handleSaveCard = (title: string, notes: string) => {
+  const handleSaveCard = async (title: string, notes: string) => {
     if (editingCard) {
       // Update existing card
-      setBoard((prev) => ({
-        ...prev,
-        cards: {
-          ...prev.cards,
-          [editingCard.id]: {
-            ...editingCard,
-            title,
-            notes,
-            updatedAt: new Date().toISOString(),
-          },
-        },
-      }));
+      try {
+        const response = await fetch(`/api/cards/${editingCard.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, notes }),
+        });
+
+        if (response.ok) {
+          const updatedCard = await response.json();
+          setBoard((prev) => ({
+            ...prev,
+            cards: {
+              ...prev.cards,
+              [editingCard.id]: {
+                ...updatedCard,
+                createdAt: updatedCard.createdAt,
+                updatedAt: updatedCard.updatedAt,
+              },
+            },
+          }));
+        }
+      } catch (error) {
+        console.error("Error updating card:", error);
+      }
     } else if (targetColumnId) {
       // Create new card
-      const newCard: KanbanCardType = {
-        id: generateId(),
-        title,
-        notes,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+      try {
+        const response = await fetch("/api/cards", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title,
+            notes,
+            columnId: targetColumnId,
+          }),
+        });
 
-      setBoard((prev) => ({
-        ...prev,
-        cards: {
-          ...prev.cards,
-          [newCard.id]: newCard,
-        },
-        columns: prev.columns.map((col) =>
-          col.id === targetColumnId
-            ? { ...col, cardIds: [...col.cardIds, newCard.id] }
-            : col
-        ),
-      }));
+        if (response.ok) {
+          // Refresh the board to get the new card
+          await fetchBoard();
+        }
+      } catch (error) {
+        console.error("Error creating card:", error);
+      }
     }
 
     setIsCardDialogOpen(false);
@@ -184,54 +231,79 @@ export function KanbanBoard() {
     setTargetColumnId(null);
   };
 
-  const handleDeleteCard = (cardId: string) => {
-    setBoard((prev) => {
-      const newCards = { ...prev.cards };
-      delete newCards[cardId];
+  const handleDeleteCard = async (cardId: string) => {
+    try {
+      const response = await fetch(`/api/cards/${cardId}`, {
+        method: "DELETE",
+      });
 
-      return {
-        ...prev,
-        cards: newCards,
-        columns: prev.columns.map((col) => ({
-          ...col,
-          cardIds: col.cardIds.filter((id) => id !== cardId),
-        })),
-      };
-    });
+      if (response.ok) {
+        // Remove from local state
+        setBoard((prev) => {
+          const newCards = { ...prev.cards };
+          delete newCards[cardId];
+
+          return {
+            ...prev,
+            cards: newCards,
+            columns: prev.columns.map((col) => ({
+              ...col,
+              cardIds: col.cardIds.filter((id) => id !== cardId),
+            })),
+          };
+        });
+      }
+    } catch (error) {
+      console.error("Error deleting card:", error);
+    }
   };
 
-  const handleAddColumn = (title: string) => {
-    const newColumn: KanbanColumnType = {
-      id: generateId(),
-      title,
-      cardIds: [],
-    };
+  const handleAddColumn = async (title: string) => {
+    try {
+      const response = await fetch("/api/columns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
 
-    setBoard((prev) => ({
-      ...prev,
-      columns: [...prev.columns, newColumn],
-    }));
+      if (response.ok) {
+        // Refresh the board to get the new column
+        await fetchBoard();
+      }
+    } catch (error) {
+      console.error("Error creating column:", error);
+    }
 
     setIsColumnDialogOpen(false);
   };
 
-  const handleDeleteColumn = (columnId: string) => {
-    setBoard((prev) => {
-      // Remove cards in this column
-      const columnToDelete = prev.columns.find((col) => col.id === columnId);
-      if (!columnToDelete) return prev;
-
-      const newCards = { ...prev.cards };
-      columnToDelete.cardIds.forEach((cardId) => {
-        delete newCards[cardId];
+  const handleDeleteColumn = async (columnId: string) => {
+    try {
+      const response = await fetch(`/api/columns/${columnId}`, {
+        method: "DELETE",
       });
 
-      return {
-        ...prev,
-        cards: newCards,
-        columns: prev.columns.filter((col) => col.id !== columnId),
-      };
-    });
+      if (response.ok) {
+        // Remove from local state
+        setBoard((prev) => {
+          const columnToDelete = prev.columns.find((col) => col.id === columnId);
+          if (!columnToDelete) return prev;
+
+          const newCards = { ...prev.cards };
+          columnToDelete.cardIds.forEach((cardId) => {
+            delete newCards[cardId];
+          });
+
+          return {
+            ...prev,
+            cards: newCards,
+            columns: prev.columns.filter((col) => col.id !== columnId),
+          };
+        });
+      }
+    } catch (error) {
+      console.error("Error deleting column:", error);
+    }
   };
 
   const handleGeneratePrompt = async (card: KanbanCardType) => {
@@ -260,7 +332,18 @@ export function KanbanBoard() {
 
       setGeneratedPrompt(data.prompt);
 
-      // Save the generated prompt to the card
+      // Save the generated prompt to the database
+      await fetch(`/api/cards/${card.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: card.title,
+          notes: card.notes,
+          generatedPrompt: data.prompt,
+        }),
+      });
+
+      // Update local state
       setBoard((prev) => ({
         ...prev,
         cards: {
@@ -283,6 +366,17 @@ export function KanbanBoard() {
   };
 
   const defaultColumnIds = ["todo", "in-progress", "completed"];
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Loading your kanban board...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950">
