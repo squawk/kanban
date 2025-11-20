@@ -33,7 +33,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
       {...attributes}
       {...listeners}
     >
-      <Card className="mb-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:scale-[1.02] bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 border-gray-200/50 dark:border-gray-700/50">
+      <Card className="mb-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:scale-[1.02] bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 border-2 border-gray-300 dark:border-gray-600">
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="text-sm font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
