@@ -7,9 +7,10 @@ interface KanbanCardProps {
   card: KanbanCardType;
   onEdit: (card: KanbanCardType) => void;
   onDelete: (cardId: string) => void;
+  onGeneratePrompt: (card: KanbanCardType) => void;
 }
 
-export function KanbanCard({ card, onEdit, onDelete }: KanbanCardProps) {
+export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanCardProps) {
   const {
     attributes,
     listeners,
@@ -39,6 +40,34 @@ export function KanbanCard({ card, onEdit, onDelete }: KanbanCardProps) {
               {card.title}
             </CardTitle>
             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onGeneratePrompt(card);
+                }}
+                className="p-1 rounded-md hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                aria-label="Generate AI prompt"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-purple-600 dark:text-purple-400"
+                >
+                  <path d="M12 8V4H8" />
+                  <rect width="16" height="12" x="4" y="8" rx="2" />
+                  <path d="M2 14h2" />
+                  <path d="M20 14h2" />
+                  <path d="M15 13v2" />
+                  <path d="M9 13v2" />
+                </svg>
+              </button>
               <button
                 onClick={(e) => {
                   e.stopPropagation();

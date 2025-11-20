@@ -13,6 +13,7 @@ import { KanbanColumn } from "./KanbanColumn";
 import { KanbanCard } from "./KanbanCard";
 import { CardDialog } from "./CardDialog";
 import { ColumnDialog } from "./ColumnDialog";
+import { PromptDialog } from "./PromptDialog";
 import { Button } from "./ui/button";
 import {
   KanbanCard as KanbanCardType,
@@ -28,6 +29,12 @@ export function KanbanBoard() {
   const [isColumnDialogOpen, setIsColumnDialogOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<KanbanCardType | null>(null);
   const [targetColumnId, setTargetColumnId] = useState<string | null>(null);
+
+  // AI Prompt generation state
+  const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
+  const [generatedPrompt, setGeneratedPrompt] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [promptError, setPromptError] = useState<string | undefined>();
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -216,6 +223,54 @@ export function KanbanBoard() {
     });
   };
 
+  const handleGeneratePrompt = async (card: KanbanCardType) => {
+    setIsPromptDialogOpen(true);
+    setIsGenerating(true);
+    setPromptError(undefined);
+    setGeneratedPrompt("");
+
+    try {
+      const response = await fetch("/api/generate-prompt", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: card.title,
+          notes: card.notes,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate prompt");
+      }
+
+      setGeneratedPrompt(data.prompt);
+
+      // Save the generated prompt to the card
+      setBoard((prev) => ({
+        ...prev,
+        cards: {
+          ...prev.cards,
+          [card.id]: {
+            ...card,
+            generatedPrompt: data.prompt,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      }));
+    } catch (error) {
+      console.error("Error generating prompt:", error);
+      setPromptError(
+        error instanceof Error ? error.message : "Failed to generate prompt"
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const defaultColumnIds = ["todo", "in-progress", "completed"];
 
   return (
@@ -269,6 +324,7 @@ export function KanbanBoard() {
                 onAddCard={handleAddCard}
                 onEditCard={handleEditCard}
                 onDeleteCard={handleDeleteCard}
+                onGeneratePrompt={handleGeneratePrompt}
                 onDeleteColumn={handleDeleteColumn}
                 isDeletable={!defaultColumnIds.includes(column.id)}
               />
@@ -282,6 +338,7 @@ export function KanbanBoard() {
                   card={activeCard}
                   onEdit={() => {}}
                   onDelete={() => {}}
+                  onGeneratePrompt={() => {}}
                 />
               </div>
             ) : null}
@@ -301,6 +358,14 @@ export function KanbanBoard() {
         open={isColumnDialogOpen}
         onOpenChange={setIsColumnDialogOpen}
         onSave={handleAddColumn}
+      />
+
+      <PromptDialog
+        open={isPromptDialogOpen}
+        onOpenChange={setIsPromptDialogOpen}
+        prompt={generatedPrompt}
+        isLoading={isGenerating}
+        error={promptError}
       />
     </div>
   );

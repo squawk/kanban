@@ -13,6 +13,7 @@ interface KanbanColumnProps {
   onAddCard: (columnId: string) => void;
   onEditCard: (card: KanbanCardType) => void;
   onDeleteCard: (cardId: string) => void;
+  onGeneratePrompt: (card: KanbanCardType) => void;
   onDeleteColumn?: (columnId: string) => void;
   isDeletable?: boolean;
 }
@@ -23,6 +24,7 @@ export function KanbanColumn({
   onAddCard,
   onEditCard,
   onDeleteCard,
+  onGeneratePrompt,
   onDeleteColumn,
   isDeletable = false,
 }: KanbanColumnProps) {
@@ -82,6 +84,7 @@ export function KanbanColumn({
                 card={card}
                 onEdit={onEditCard}
                 onDelete={onDeleteCard}
+                onGeneratePrompt={onGeneratePrompt}
               />
             ))}
           </div>

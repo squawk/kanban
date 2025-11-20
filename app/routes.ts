@@ -7,4 +7,5 @@ import {
 export default [
   index("routes/home.tsx"),
   route("about", "routes/about.tsx"),
+  route("api/generate-prompt", "routes/api.generate-prompt.ts"),
 ] satisfies RouteConfig;
