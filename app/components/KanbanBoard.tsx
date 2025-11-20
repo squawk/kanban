@@ -9,6 +9,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
+import confetti from "canvas-confetti";
 import { KanbanColumn } from "./KanbanColumn";
 import { KanbanCard } from "./KanbanCard";
 import { CardDialog } from "./CardDialog";
@@ -114,6 +115,16 @@ export function KanbanBoard() {
           return col;
         }),
       }));
+
+      // Trigger confetti if card is moved to completed column
+      if (overColumn.id === "completed" && activeColumn.id !== "completed") {
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#60a5fa', '#a78bfa', '#f472b6'], // Blue, purple, pink to match the gradient
+        });
+      }
     }
   };
 
