@@ -71,7 +71,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
             <CardTitle className="text-sm font-semibold text-foreground line-clamp-2">
               {card.title}
             </CardTitle>
-            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
               <button
                 onClick={(e) => {
                   e.stopPropagation();

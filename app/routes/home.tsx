@@ -68,8 +68,8 @@ export default function Home() {
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-foreground">Kanban Board</h1>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-muted-foreground text-sm">
+          <div className="flex items-center gap-2 sm:gap-4">
+            <span className="hidden sm:inline text-muted-foreground text-sm">
               Welcome, <span className="font-medium text-foreground">{user.name}</span>
             </span>
             <Button
