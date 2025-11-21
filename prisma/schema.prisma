@@ -32,14 +32,26 @@ model Column {
 }
 
 model Card {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   title           String
-  notes           String   @db.Text
-  generatedPrompt String?  @db.Text
+  notes           String    @db.Text
+  generatedPrompt String?   @db.Text
   boardId         String
-  board           Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  board           Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  comments        Comment[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([boardId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String   @db.Text
+  cardId    String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cardId])
 }
