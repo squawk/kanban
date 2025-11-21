@@ -238,7 +238,7 @@ export function CardDialog({
         <div className="space-y-4 py-4">
           {/* Title */}
           <div className="space-y-2">
-            <label htmlFor="title" className="text-sm font-medium text-gray-900 dark:text-gray-100">
+            <label htmlFor="title" className="text-sm font-medium text-foreground">
               Title
             </label>
             <Input
@@ -255,7 +255,7 @@ export function CardDialog({
           <div className="grid grid-cols-2 gap-4">
             {/* Priority */}
             <div className="space-y-2">
-              <label htmlFor="priority" className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-1">
+              <label htmlFor="priority" className="text-sm font-medium text-foreground flex items-center gap-1">
                 <AlertCircle className="h-3 w-3" />
                 Priority
               </label>
@@ -263,7 +263,7 @@ export function CardDialog({
                 id="priority"
                 value={priority}
                 onChange={(e) => setPriority(e.target.value as 'low' | 'medium' | 'high')}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-sm"
+                className="w-full px-3 py-2 border-2 border-border rounded-md bg-card text-foreground text-sm"
               >
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
@@ -273,7 +273,7 @@ export function CardDialog({
 
             {/* Due Date */}
             <div className="space-y-2">
-              <label htmlFor="dueDate" className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-1">
+              <label htmlFor="dueDate" className="text-sm font-medium text-foreground flex items-center gap-1">
                 <Calendar className="h-3 w-3" />
                 Due Date
               </label>
@@ -289,7 +289,7 @@ export function CardDialog({
           {/* Tags */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-1">
+              <label className="text-sm font-medium text-foreground flex items-center gap-1">
                 <TagIcon className="h-3 w-3" />
                 Tags
               </label>
@@ -306,7 +306,7 @@ export function CardDialog({
             </div>
 
             {loadingTags ? (
-              <p className="text-sm text-gray-500">Loading tags...</p>
+              <p className="text-sm text-muted-foreground">Loading tags...</p>
             ) : (
               <>
                 <div className="flex flex-wrap gap-2">
@@ -317,7 +317,7 @@ export function CardDialog({
                       onClick={() => toggleTag(tag.id)}
                       className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
                         selectedTagIds.includes(tag.id)
-                          ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-gray-900'
+                          ? 'ring-2 ring-offset-2 ring-offset-card'
                           : 'opacity-60 hover:opacity-100'
                       }`}
                       style={{
@@ -332,7 +332,7 @@ export function CardDialog({
 
                 {/* New Tag Creation */}
                 {showNewTagInput && (
-                  <div className="border-2 border-gray-300 dark:border-gray-600 rounded-lg p-3 space-y-2 bg-gray-50 dark:bg-gray-800">
+                  <div className="border-2 border-border rounded-lg p-3 space-y-2 bg-muted">
                     <div className="flex gap-2">
                       <Input
                         placeholder="Tag name..."
@@ -345,7 +345,7 @@ export function CardDialog({
                         type="color"
                         value={newTagColor}
                         onChange={(e) => setNewTagColor(e.target.value)}
-                        className="w-12 h-9 rounded border-2 border-gray-300 dark:border-gray-600 cursor-pointer"
+                        className="w-12 h-9 rounded border-2 border-border cursor-pointer"
                         title="Choose tag color"
                         disabled={creatingTag}
                       />
@@ -356,7 +356,7 @@ export function CardDialog({
                         size="sm"
                         onClick={handleCreateTag}
                         disabled={!newTagName.trim() || creatingTag}
-                        className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
+                        className="bg-primary hover:bg-primary/90 text-primary-foreground"
                       >
                         {creatingTag ? "Creating..." : "Create Tag"}
                       </Button>
@@ -382,7 +382,7 @@ export function CardDialog({
 
           {/* Notes */}
           <div className="space-y-2">
-            <label htmlFor="notes" className="text-sm font-medium text-gray-900 dark:text-gray-100">
+            <label htmlFor="notes" className="text-sm font-medium text-foreground">
               Notes
             </label>
             <Textarea
@@ -397,14 +397,14 @@ export function CardDialog({
 
           {/* Comments Section - Only show when editing existing card */}
           {cardId && (
-            <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+            <div className="space-y-3 pt-2 border-t border-border">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                 <MessageSquare className="h-4 w-4" />
                 <span>Comments ({comments.length})</span>
               </div>
 
               {loadingComments ? (
-                <div className="text-sm text-gray-500 dark:text-gray-400 py-2">
+                <div className="text-sm text-muted-foreground py-2">
                   Loading comments...
                 </div>
               ) : comments.length > 0 ? (
@@ -412,19 +412,19 @@ export function CardDialog({
                   {comments.map((comment) => (
                     <div
                       key={comment.id}
-                      className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-1"
+                      className="bg-muted rounded-lg p-3 space-y-1"
                     >
-                      <p className="text-sm text-gray-900 dark:text-gray-100">
+                      <p className="text-sm text-foreground">
                         {comment.content}
                       </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                      <p className="text-xs text-muted-foreground">
                         {formatDate(comment.createdAt)}
                       </p>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400 py-2">
+                <p className="text-sm text-muted-foreground py-2">
                   No comments yet
                 </p>
               )}
@@ -442,7 +442,7 @@ export function CardDialog({
                   size="sm"
                   onClick={handleAddComment}
                   disabled={!newComment.trim() || addingComment}
-                  className="bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground"
                 >
                   <Send className="h-3 w-3 mr-1" />
                   {addingComment ? "Adding..." : "Add Comment"}
@@ -451,7 +451,7 @@ export function CardDialog({
             </div>
           )}
 
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-muted-foreground">
             Press Cmd/Ctrl + Enter to save card
           </p>
         </div>
@@ -462,7 +462,6 @@ export function CardDialog({
           <Button
             onClick={handleSave}
             disabled={!title.trim()}
-            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
           >
             {initialCard ? "Update" : "Create"}
           </Button>

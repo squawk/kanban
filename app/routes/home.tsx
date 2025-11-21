@@ -47,8 +47,11 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
       </div>
     );
   }
@@ -58,22 +61,21 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+    <div className="min-h-screen bg-background">
       {/* Navbar */}
-      <nav className="bg-black/20 border-b border-white/10 px-4 py-3">
+      <nav className="bg-card border-b-2 border-border px-4 py-3 shadow-sm">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold text-white">Kanban Board</h1>
+            <h1 className="text-xl font-bold text-foreground">Kanban Board</h1>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-gray-300 text-sm">
-              Welcome, <span className="font-medium text-white">{user.name}</span>
+            <span className="text-muted-foreground text-sm">
+              Welcome, <span className="font-medium text-foreground">{user.name}</span>
             </span>
             <Button
               onClick={handleLogout}
               variant="outline"
               size="sm"
-              className="bg-transparent border-gray-600 text-gray-300 hover:bg-white/10 hover:text-white"
             >
               Logout
             </Button>

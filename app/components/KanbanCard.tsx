@@ -28,17 +28,17 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'border-l-red-500';
-      case 'low': return 'border-l-blue-500';
-      default: return 'border-l-yellow-500';
+      case 'high': return 'border-l-destructive';
+      case 'low': return 'border-l-primary/50';
+      default: return 'border-l-primary';
     }
   };
 
   const getPriorityIcon = (priority: string) => {
     switch (priority) {
-      case 'high': return <AlertCircle className="h-3 w-3 text-red-500" />;
-      case 'low': return <AlertCircle className="h-3 w-3 text-blue-500" />;
-      default: return <AlertCircle className="h-3 w-3 text-yellow-500" />;
+      case 'high': return <AlertCircle className="h-3 w-3 text-destructive" />;
+      case 'low': return <AlertCircle className="h-3 w-3 text-primary/50" />;
+      default: return <AlertCircle className="h-3 w-3 text-primary" />;
     }
   };
 
@@ -65,10 +65,10 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
       {...attributes}
       {...listeners}
     >
-      <Card className={`mb-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:scale-[1.02] bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 border-2 border-gray-400 dark:border-gray-500 border-l-4 ${getPriorityColor(card.priority)}`}>
+      <Card className={`mb-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:scale-[1.02] bg-card border-2 border-border border-l-4 ${getPriorityColor(card.priority)}`}>
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">
-            <CardTitle className="text-sm font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
+            <CardTitle className="text-sm font-semibold text-foreground line-clamp-2">
               {card.title}
             </CardTitle>
             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -77,7 +77,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
                   e.stopPropagation();
                   onGeneratePrompt(card);
                 }}
-                className="p-1 rounded-md hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                className="p-1 rounded-md hover:bg-primary/10 transition-colors"
                 aria-label="Generate AI prompt"
               >
                 <svg
@@ -90,7 +90,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
                   strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="text-purple-600 dark:text-purple-400"
+                  className="text-primary"
                 >
                   <path d="M12 8V4H8" />
                   <rect width="16" height="12" x="4" y="8" rx="2" />
@@ -105,7 +105,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
                   e.stopPropagation();
                   onEdit(card);
                 }}
-                className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                className="p-1 rounded-md hover:bg-muted transition-colors"
                 aria-label="Edit card"
               >
                 <svg
@@ -118,7 +118,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
                   strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="text-gray-600 dark:text-gray-400"
+                  className="text-muted-foreground"
                 >
                   <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
                   <path d="m15 5 4 4" />
@@ -129,7 +129,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
                   e.stopPropagation();
                   onDelete(card.id);
                 }}
-                className="p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                className="p-1 rounded-md hover:bg-destructive/10 transition-colors"
                 aria-label="Delete card"
               >
                 <svg
@@ -142,7 +142,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
                   strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="text-red-600 dark:text-red-400"
+                  className="text-destructive"
                 >
                   <path d="M3 6h18" />
                   <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
@@ -169,13 +169,13 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
         </CardHeader>
         <CardContent className="pt-0 space-y-2">
           {card.notes && (
-            <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-3">
+            <p className="text-xs text-muted-foreground line-clamp-3">
               {card.notes}
             </p>
           )}
 
           {/* Footer with due date, priority, and comments */}
-          <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-1">
+          <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
             <div className="flex items-center gap-2">
               {/* Priority indicator */}
               <div className="flex items-center gap-0.5" title={`Priority: ${card.priority}`}>
@@ -187,9 +187,9 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
                 <div
                   className={`flex items-center gap-1 ${
                     dueInfo.isOverdue
-                      ? 'text-red-600 dark:text-red-400 font-semibold'
+                      ? 'text-destructive font-semibold'
                       : dueInfo.isToday
-                      ? 'text-orange-600 dark:text-orange-400 font-semibold'
+                      ? 'text-primary font-semibold'
                       : ''
                   }`}
                   title={dueInfo.isOverdue ? 'Overdue!' : dueInfo.isToday ? 'Due today' : 'Due date'}

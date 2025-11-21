@@ -51,7 +51,7 @@ export function ColumnDialog({
           <div className="space-y-2">
             <label
               htmlFor="column-title"
-              className="text-sm font-medium text-gray-900 dark:text-gray-100"
+              className="text-sm font-medium text-foreground"
             >
               Column Title
             </label>
@@ -64,7 +64,7 @@ export function ColumnDialog({
               autoFocus
             />
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-muted-foreground">
             Press Enter to save
           </p>
         </div>
@@ -78,7 +78,6 @@ export function ColumnDialog({
           <Button
             onClick={handleSave}
             disabled={!title.trim()}
-            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
           >
             Create
           </Button>
