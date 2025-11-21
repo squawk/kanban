@@ -7,12 +7,19 @@ import {
 export default [
   index("routes/home.tsx"),
   route("login", "routes/login.tsx"),
+  route("verify-email", "routes/verify-email.tsx"),
+  route("reset-password", "routes/reset-password.tsx"),
+  route("forgot-password", "routes/forgot-password.tsx"),
   route("about", "routes/about.tsx"),
   // Auth routes
   route("api/auth/register", "routes/api.auth.register.ts"),
   route("api/auth/login", "routes/api.auth.login.ts"),
   route("api/auth/logout", "routes/api.auth.logout.ts"),
   route("api/auth/me", "routes/api.auth.me.ts"),
+  route("api/auth/verify-email", "routes/api.auth.verify-email.ts"),
+  route("api/auth/forgot-password", "routes/api.auth.forgot-password.ts"),
+  route("api/auth/reset-password", "routes/api.auth.reset-password.ts"),
+  route("api/auth/approve", "routes/api.auth.approve.ts"),
   // Board routes
   route("api/generate-prompt", "routes/api.generate-prompt.ts"),
   route("api/board", "routes/api.board.ts"),

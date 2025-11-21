@@ -1,10 +1,22 @@
-import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useState, useEffect, useRef } from "react";
+import { useNavigate, Link } from "react-router";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { useTheme } from "~/lib/theme";
 import { Palette } from "lucide-react";
+
+declare global {
+  interface Window {
+    grecaptcha: {
+      ready: (callback: () => void) => void;
+      render: (container: HTMLElement, options: { sitekey: string; callback: (token: string) => void }) => number;
+      reset: (widgetId: number) => void;
+    };
+  }
+}
+
+const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -14,19 +26,70 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
+  const recaptchaRef = useRef<HTMLDivElement>(null);
+  const recaptchaWidgetId = useRef<number | null>(null);
+
+  // Load reCAPTCHA script
+  useEffect(() => {
+    if (!RECAPTCHA_SITE_KEY || isLogin) return;
+
+    const script = document.createElement("script");
+    script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+
+    script.onload = () => {
+      if (window.grecaptcha && recaptchaRef.current) {
+        window.grecaptcha.ready(() => {
+          if (recaptchaRef.current && recaptchaWidgetId.current === null) {
+            recaptchaWidgetId.current = window.grecaptcha.render(recaptchaRef.current, {
+              sitekey: RECAPTCHA_SITE_KEY,
+              callback: (token: string) => setRecaptchaToken(token),
+            });
+          }
+        });
+      }
+    };
+
+    return () => {
+      // Clean up script on unmount
+      const existingScript = document.querySelector(`script[src*="recaptcha"]`);
+      if (existingScript) {
+        existingScript.remove();
+      }
+    };
+  }, [isLogin]);
+
+  // Re-render reCAPTCHA when switching to register mode
+  useEffect(() => {
+    if (!isLogin && RECAPTCHA_SITE_KEY && window.grecaptcha && recaptchaRef.current) {
+      window.grecaptcha.ready(() => {
+        if (recaptchaRef.current && recaptchaWidgetId.current === null) {
+          recaptchaWidgetId.current = window.grecaptcha.render(recaptchaRef.current, {
+            sitekey: RECAPTCHA_SITE_KEY,
+            callback: (token: string) => setRecaptchaToken(token),
+          });
+        }
+      });
+    }
+  }, [isLogin]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setSuccess("");
     setLoading(true);
 
     try {
       const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
       const body = isLogin
         ? { email, password }
-        : { email, password, name };
+        : { email, password, name, recaptchaToken };
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -38,11 +101,28 @@ export default function LoginPage() {
 
       if (!response.ok) {
         setError(data.error || "Something went wrong");
+        // Reset reCAPTCHA on error
+        if (!isLogin && recaptchaWidgetId.current !== null && window.grecaptcha) {
+          window.grecaptcha.reset(recaptchaWidgetId.current);
+          setRecaptchaToken(null);
+        }
         return;
       }
 
-      // Redirect to home page on success
-      navigate("/");
+      if (isLogin) {
+        // Redirect to home page on successful login
+        navigate("/");
+      } else {
+        // Show success message for registration
+        setSuccess(data.message || "Registration successful! Please check your email.");
+        setEmail("");
+        setPassword("");
+        setName("");
+        setRecaptchaToken(null);
+        if (recaptchaWidgetId.current !== null && window.grecaptcha) {
+          window.grecaptcha.reset(recaptchaWidgetId.current);
+        }
+      }
     } catch (err) {
       setError("Network error. Please try again.");
     } finally {
@@ -77,6 +157,12 @@ export default function LoginPage() {
             </p>
           </div>
 
+          {success && (
+            <div className="bg-green-500/10 text-green-700 dark:text-green-400 text-sm p-4 rounded-lg border border-green-500/20 mb-4">
+              {success}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && (
               <div className="space-y-2">
@@ -105,7 +191,17 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                {isLogin && (
+                  <Link
+                    to="/forgot-password"
+                    className="text-sm text-primary hover:text-primary/80 underline underline-offset-4"
+                  >
+                    Forgot password?
+                  </Link>
+                )}
+              </div>
               <div className="relative">
                 <Input
                   id="password"
@@ -158,6 +254,13 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {/* reCAPTCHA for registration */}
+            {!isLogin && RECAPTCHA_SITE_KEY && (
+              <div className="flex justify-center">
+                <div ref={recaptchaRef}></div>
+              </div>
+            )}
+
             {error && (
               <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg border border-destructive/20">
                 {error}
@@ -167,7 +270,7 @@ export default function LoginPage() {
             <Button
               type="submit"
               className="w-full"
-              disabled={loading}
+              disabled={loading || (!isLogin && RECAPTCHA_SITE_KEY && !recaptchaToken)}
             >
               {loading ? "Loading..." : isLogin ? "Sign In" : "Create Account"}
             </Button>
@@ -179,6 +282,9 @@ export default function LoginPage() {
               onClick={() => {
                 setIsLogin(!isLogin);
                 setError("");
+                setSuccess("");
+                setRecaptchaToken(null);
+                recaptchaWidgetId.current = null;
               }}
               className="text-primary hover:text-primary/80 text-sm font-medium underline underline-offset-4"
             >
