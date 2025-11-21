@@ -1,13 +1,32 @@
-import type { Route } from "./+types/api.columns";
-import { prisma } from "~/lib/prisma";
+import { db } from "~/lib/db";
+import { columns } from "~/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { getSession, getUserBoard } from "~/lib/auth";
+import { nanoid } from "nanoid";
 
 // POST /api/columns - Create a new column
-export async function action({ request }: Route.ActionArgs) {
+export async function action({ request }: { request: Request }) {
   if (request.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
 
   try {
+    const session = await getSession(request);
+    if (!session.userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const board = getUserBoard(session.userId);
+    if (!board) {
+      return new Response(
+        JSON.stringify({ error: "Board not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const { title } = await request.json();
 
     if (!title) {
@@ -17,32 +36,27 @@ export async function action({ request }: Route.ActionArgs) {
       );
     }
 
-    // Get the first board
-    const board = await prisma.board.findFirst();
-
-    if (!board) {
-      return new Response(
-        JSON.stringify({ error: "Board not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
     // Get the current column count to set position
-    const columnCount = await prisma.column.count({
-      where: { boardId: board.id },
-    });
+    const existingColumns = db.select().from(columns).where(eq(columns.boardId, board.id)).all();
+    const columnCount = existingColumns.length;
+
+    const columnId = nanoid();
+    const now = new Date();
 
     // Create the column
-    const column = await prisma.column.create({
-      data: {
-        title,
-        position: columnCount,
-        boardId: board.id,
-        cardIds: JSON.stringify([]),
-      },
-    });
+    db.insert(columns).values({
+      id: columnId,
+      title,
+      position: columnCount,
+      boardId: board.id,
+      cardIds: "[]",
+      createdAt: now,
+      updatedAt: now,
+    }).run();
 
-    return new Response(JSON.stringify(column), {
+    const newColumn = db.select().from(columns).where(eq(columns.id, columnId)).get();
+
+    return new Response(JSON.stringify(newColumn), {
       status: 201,
       headers: { "Content-Type": "application/json" },
     });

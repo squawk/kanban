@@ -1,21 +1,26 @@
-import type { Route } from "./+types/api.templates";
-import { prisma } from "~/lib/prisma";
+import { db } from "~/lib/db";
+import { templates } from "~/lib/db/schema";
+import { eq, asc } from "drizzle-orm";
+import { getSession } from "~/lib/auth";
+import { nanoid } from "nanoid";
 
 // GET /api/templates - Get all templates
-export async function loader() {
+export async function loader({ request }: { request: Request }) {
   try {
-    const templates = await prisma.template.findMany({
-      orderBy: {
-        name: "asc",
-      },
-    });
+    const session = await getSession(request);
+    if (!session.userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const allTemplates = db.select().from(templates).orderBy(asc(templates.name)).all();
 
     // Transform JSON fields
-    const transformedTemplates = templates.map((template: any) => ({
+    const transformedTemplates = allTemplates.map((template) => ({
       ...template,
-      tags: Array.isArray(template.tags)
-        ? template.tags
-        : JSON.parse(template.tags as string),
+      tags: JSON.parse(template.tags),
       createdAt: template.createdAt.toISOString(),
       updatedAt: template.updatedAt.toISOString(),
     }));
@@ -33,13 +38,21 @@ export async function loader() {
 }
 
 // POST /api/templates - Create a new template
-export async function action({ request }: Route.ActionArgs) {
+export async function action({ request }: { request: Request }) {
   if (request.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
 
   try {
-    const { name, title, notes, tags, priority } = await request.json();
+    const session = await getSession(request);
+    if (!session.userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const { name, title, notes, tags: templateTags, priority } = await request.json();
 
     if (!name || !title) {
       return new Response(
@@ -48,24 +61,28 @@ export async function action({ request }: Route.ActionArgs) {
       );
     }
 
-    const template = await prisma.template.create({
-      data: {
-        name,
-        title,
-        notes: notes || "",
-        tags: JSON.stringify(tags || []),
-        priority: priority || "medium",
-      },
-    });
+    const templateId = nanoid();
+    const now = new Date();
+
+    db.insert(templates).values({
+      id: templateId,
+      name,
+      title,
+      notes: notes || "",
+      tags: JSON.stringify(templateTags || []),
+      priority: priority || "medium",
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    const newTemplate = db.select().from(templates).where(eq(templates.id, templateId)).get();
 
     return new Response(
       JSON.stringify({
-        ...template,
-        tags: Array.isArray(template.tags)
-          ? template.tags
-          : JSON.parse(template.tags as string),
-        createdAt: template.createdAt.toISOString(),
-        updatedAt: template.updatedAt.toISOString(),
+        ...newTemplate,
+        tags: JSON.parse(newTemplate!.tags),
+        createdAt: newTemplate!.createdAt.toISOString(),
+        updatedAt: newTemplate!.updatedAt.toISOString(),
       }),
       {
         status: 201,

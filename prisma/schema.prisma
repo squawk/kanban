@@ -6,16 +6,31 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  boards       Board[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Board {
   id        String   @id @default(cuid())
+  name      String   @default("My Board")
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   columns   Column[]
   cards     Card[]
+
+  @@index([userId])
 }
 
 model Column {
@@ -24,7 +39,7 @@ model Column {
   position  Int
   boardId   String
   board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  cardIds   Json     @default("[]")
+  cardIds   String   @default("[]")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -34,10 +49,10 @@ model Column {
 model Card {
   id              String     @id @default(cuid())
   title           String
-  notes           String     @db.Text
-  generatedPrompt String?    @db.Text
+  notes           String
+  generatedPrompt String?
   dueDate         DateTime?
-  priority        String     @default("medium") // low, medium, high
+  priority        String     @default("medium")
   boardId         String
   board           Board      @relation(fields: [boardId], references: [id], onDelete: Cascade)
   comments        Comment[]
@@ -51,7 +66,7 @@ model Card {
 
 model Comment {
   id        String   @id @default(cuid())
-  content   String   @db.Text
+  content   String
   cardId    String
   card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
@@ -63,7 +78,7 @@ model Comment {
 model Tag {
   id        String    @id @default(cuid())
   name      String    @unique
-  color     String    // hex color code
+  color     String
   cards     CardTag[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -85,8 +100,8 @@ model Template {
   id        String   @id @default(cuid())
   name      String
   title     String
-  notes     String   @db.Text
-  tags      Json     @default("[]") // Array of tag IDs
+  notes     String
+  tags      String   @default("[]")
   priority  String   @default("medium")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

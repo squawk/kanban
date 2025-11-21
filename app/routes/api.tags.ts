@@ -1,16 +1,23 @@
-import type { Route } from "./+types/api.tags";
-import { prisma } from "~/lib/prisma";
+import { db } from "~/lib/db";
+import { tags } from "~/lib/db/schema";
+import { eq, asc } from "drizzle-orm";
+import { getSession } from "~/lib/auth";
+import { nanoid } from "nanoid";
 
 // GET /api/tags - Get all tags
-export async function loader() {
+export async function loader({ request }: { request: Request }) {
   try {
-    const tags = await prisma.tag.findMany({
-      orderBy: {
-        name: "asc",
-      },
-    });
+    const session = await getSession(request);
+    if (!session.userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
-    return new Response(JSON.stringify(tags), {
+    const allTags = db.select().from(tags).orderBy(asc(tags.name)).all();
+
+    return new Response(JSON.stringify(allTags), {
       headers: { "Content-Type": "application/json" },
     });
   } catch (error) {
@@ -23,12 +30,20 @@ export async function loader() {
 }
 
 // POST /api/tags - Create a new tag
-export async function action({ request }: Route.ActionArgs) {
+export async function action({ request }: { request: Request }) {
   if (request.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
 
   try {
+    const session = await getSession(request);
+    if (!session.userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const { name, color } = await request.json();
 
     if (!name || !color) {
@@ -39,9 +54,7 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     // Check if tag with this name already exists
-    const existing = await prisma.tag.findUnique({
-      where: { name },
-    });
+    const existing = db.select().from(tags).where(eq(tags.name, name)).get();
 
     if (existing) {
       return new Response(
@@ -50,14 +63,20 @@ export async function action({ request }: Route.ActionArgs) {
       );
     }
 
-    const tag = await prisma.tag.create({
-      data: {
-        name,
-        color,
-      },
-    });
+    const tagId = nanoid();
+    const now = new Date();
 
-    return new Response(JSON.stringify(tag), {
+    db.insert(tags).values({
+      id: tagId,
+      name,
+      color,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    const newTag = db.select().from(tags).where(eq(tags.id, tagId)).get();
+
+    return new Response(JSON.stringify(newTag), {
       status: 201,
       headers: { "Content-Type": "application/json" },
     });

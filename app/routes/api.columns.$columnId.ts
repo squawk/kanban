@@ -1,8 +1,10 @@
-import type { Route } from "./+types/api.columns.$columnId";
-import { prisma } from "~/lib/prisma";
+import { db } from "~/lib/db";
+import { columns, cards, cardTags, comments } from "~/lib/db/schema";
+import { eq, inArray } from "drizzle-orm";
+import { getSession, getUserBoard } from "~/lib/auth";
 
 // DELETE /api/columns/:columnId - Delete a column
-export async function action({ request, params }: Route.ActionArgs) {
+export async function action({ request, params }: { request: Request; params: { columnId: string } }) {
   if (request.method !== "DELETE") {
     return new Response("Method not allowed", { status: 405 });
   }
@@ -17,12 +19,26 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   try {
-    // Get the column with its cards
-    const column = await prisma.column.findUnique({
-      where: { id: columnId },
-    });
+    const session = await getSession(request);
+    if (!session.userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
-    if (!column) {
+    const board = getUserBoard(session.userId);
+    if (!board) {
+      return new Response(
+        JSON.stringify({ error: "Board not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Get the column
+    const column = db.select().from(columns).where(eq(columns.id, columnId)).get();
+
+    if (!column || column.boardId !== board.id) {
       return new Response(
         JSON.stringify({ error: "Column not found" }),
         { status: 404, headers: { "Content-Type": "application/json" } }
@@ -30,24 +46,22 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
 
     // Delete all cards in this column
-    const cardIds = Array.isArray(column.cardIds)
-      ? column.cardIds
-      : JSON.parse(column.cardIds as string);
+    const cardIdsList = JSON.parse(column.cardIds) as string[];
 
-    if (cardIds.length > 0) {
-      await prisma.card.deleteMany({
-        where: {
-          id: {
-            in: cardIds,
-          },
-        },
-      });
+    if (cardIdsList.length > 0) {
+      // Delete card tags
+      for (const cardId of cardIdsList) {
+        db.delete(cardTags).where(eq(cardTags.cardId, cardId)).run();
+        db.delete(comments).where(eq(comments.cardId, cardId)).run();
+      }
+      // Delete cards
+      for (const cardId of cardIdsList) {
+        db.delete(cards).where(eq(cards.id, cardId)).run();
+      }
     }
 
     // Delete the column
-    await prisma.column.delete({
-      where: { id: columnId },
-    });
+    db.delete(columns).where(eq(columns.id, columnId)).run();
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { "Content-Type": "application/json" },

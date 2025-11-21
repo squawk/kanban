@@ -141,3 +141,4 @@ vite.config.ts.timestamp-*
 # React Router build output
 build/
 .react-router/
+data.db
