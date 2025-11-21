@@ -323,7 +323,6 @@ export function CardDialog({
                       style={{
                         backgroundColor: selectedTagIds.includes(tag.id) ? tag.color : `${tag.color}40`,
                         color: selectedTagIds.includes(tag.id) ? 'white' : tag.color,
-                        ringColor: tag.color,
                       }}
                     >
                       {tag.name}
