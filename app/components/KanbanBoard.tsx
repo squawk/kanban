@@ -177,29 +177,31 @@ export function KanbanBoard() {
     setIsCardDialogOpen(true);
   };
 
-  const handleSaveCard = async (title: string, notes: string) => {
+  const handleSaveCard = async (data: {
+    title: string;
+    notes: string;
+    dueDate?: string;
+    priority: 'low' | 'medium' | 'high';
+    tagIds: string[];
+  }) => {
     if (editingCard) {
       // Update existing card
       try {
         const response = await fetch(`/api/cards/${editingCard.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, notes }),
+          body: JSON.stringify({
+            title: data.title,
+            notes: data.notes,
+            dueDate: data.dueDate,
+            priority: data.priority,
+            tagIds: data.tagIds,
+          }),
         });
 
         if (response.ok) {
-          const updatedCard = await response.json();
-          setBoard((prev) => ({
-            ...prev,
-            cards: {
-              ...prev.cards,
-              [editingCard.id]: {
-                ...updatedCard,
-                createdAt: updatedCard.createdAt,
-                updatedAt: updatedCard.updatedAt,
-              },
-            },
-          }));
+          // Refresh board to get updated card with tags
+          await fetchBoard();
         }
       } catch (error) {
         console.error("Error updating card:", error);
@@ -211,8 +213,11 @@ export function KanbanBoard() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title,
-            notes,
+            title: data.title,
+            notes: data.notes,
+            dueDate: data.dueDate,
+            priority: data.priority,
+            tagIds: data.tagIds,
             columnId: targetColumnId,
           }),
         });
@@ -455,8 +460,7 @@ export function KanbanBoard() {
         open={isCardDialogOpen}
         onOpenChange={setIsCardDialogOpen}
         onSave={handleSaveCard}
-        initialTitle={editingCard?.title}
-        initialNotes={editingCard?.notes}
+        initialCard={editingCard || undefined}
         cardId={editingCard?.id}
       />
 

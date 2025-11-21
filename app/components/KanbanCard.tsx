@@ -2,7 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { KanbanCard as KanbanCardType } from "~/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Calendar, AlertCircle } from "lucide-react";
 
 interface KanbanCardProps {
   card: KanbanCardType;
@@ -26,6 +26,37 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
     transition,
   };
 
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high': return 'border-l-red-500';
+      case 'low': return 'border-l-blue-500';
+      default: return 'border-l-yellow-500';
+    }
+  };
+
+  const getPriorityIcon = (priority: string) => {
+    switch (priority) {
+      case 'high': return <AlertCircle className="h-3 w-3 text-red-500" />;
+      case 'low': return <AlertCircle className="h-3 w-3 text-blue-500" />;
+      default: return <AlertCircle className="h-3 w-3 text-yellow-500" />;
+    }
+  };
+
+  const formatDueDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const isOverdue = date < now;
+    const isToday = date.toDateString() === now.toDateString();
+
+    return {
+      text: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      isOverdue,
+      isToday,
+    };
+  };
+
+  const dueInfo = card.dueDate ? formatDueDate(card.dueDate) : null;
+
   return (
     <div
       ref={setNodeRef}
@@ -34,7 +65,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
       {...attributes}
       {...listeners}
     >
-      <Card className="mb-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:scale-[1.02] bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 border-2 border-gray-300 dark:border-gray-600">
+      <Card className={`mb-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:scale-[1.02] bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 border-2 border-gray-300 dark:border-gray-600 border-l-4 ${getPriorityColor(card.priority)}`}>
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="text-sm font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
@@ -120,6 +151,21 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
               </button>
             </div>
           </div>
+
+          {/* Tags */}
+          {card.tags && card.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {card.tags.map((tag) => (
+                <span
+                  key={tag.id}
+                  className="px-2 py-0.5 rounded-full text-xs font-medium text-white"
+                  style={{ backgroundColor: tag.color }}
+                >
+                  {tag.name}
+                </span>
+              ))}
+            </div>
+          )}
         </CardHeader>
         <CardContent className="pt-0 space-y-2">
           {card.notes && (
@@ -127,12 +173,41 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
               {card.notes}
             </p>
           )}
-          {card.comments && card.comments.length > 0 && (
-            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-              <MessageSquare className="h-3 w-3" />
-              <span>{card.comments.length} {card.comments.length === 1 ? 'comment' : 'comments'}</span>
+
+          {/* Footer with due date, priority, and comments */}
+          <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-1">
+            <div className="flex items-center gap-2">
+              {/* Priority indicator */}
+              <div className="flex items-center gap-0.5" title={`Priority: ${card.priority}`}>
+                {getPriorityIcon(card.priority)}
+              </div>
+
+              {/* Due date */}
+              {dueInfo && (
+                <div
+                  className={`flex items-center gap-1 ${
+                    dueInfo.isOverdue
+                      ? 'text-red-600 dark:text-red-400 font-semibold'
+                      : dueInfo.isToday
+                      ? 'text-orange-600 dark:text-orange-400 font-semibold'
+                      : ''
+                  }`}
+                  title={dueInfo.isOverdue ? 'Overdue!' : dueInfo.isToday ? 'Due today' : 'Due date'}
+                >
+                  <Calendar className="h-3 w-3" />
+                  <span>{dueInfo.text}</span>
+                </div>
+              )}
             </div>
-          )}
+
+            {/* Comments count */}
+            {card.comments && card.comments.length > 0 && (
+              <div className="flex items-center gap-1">
+                <MessageSquare className="h-3 w-3" />
+                <span>{card.comments.length}</span>
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

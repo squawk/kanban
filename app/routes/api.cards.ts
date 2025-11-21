@@ -8,7 +8,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   try {
-    const { title, notes, columnId } = await request.json();
+    const { title, notes, columnId, dueDate, priority, tagIds } = await request.json();
 
     if (!title || !columnId) {
       return new Response(
@@ -32,7 +32,16 @@ export async function action({ request }: Route.ActionArgs) {
       data: {
         title,
         notes: notes || "",
+        dueDate: dueDate ? new Date(dueDate) : undefined,
+        priority: priority || "medium",
         boardId: board.id,
+        tags: tagIds && tagIds.length > 0 ? {
+          create: tagIds.map((tagId: string) => ({
+            tag: {
+              connect: { id: tagId },
+            },
+          })),
+        } : undefined,
       },
     });
 

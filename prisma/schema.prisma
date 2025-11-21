@@ -32,17 +32,21 @@ model Column {
 }
 
 model Card {
-  id              String    @id @default(cuid())
+  id              String     @id @default(cuid())
   title           String
-  notes           String    @db.Text
-  generatedPrompt String?   @db.Text
+  notes           String     @db.Text
+  generatedPrompt String?    @db.Text
+  dueDate         DateTime?
+  priority        String     @default("medium") // low, medium, high
   boardId         String
-  board           Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  board           Board      @relation(fields: [boardId], references: [id], onDelete: Cascade)
   comments        Comment[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  tags            CardTag[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 
   @@index([boardId])
+  @@index([dueDate])
 }
 
 model Comment {
@@ -54,4 +58,36 @@ model Comment {
   updatedAt DateTime @updatedAt
 
   @@index([cardId])
+}
+
+model Tag {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  color     String    // hex color code
+  cards     CardTag[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model CardTag {
+  cardId    String
+  tagId     String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([cardId, tagId])
+  @@index([cardId])
+  @@index([tagId])
+}
+
+model Template {
+  id        String   @id @default(cuid())
+  name      String
+  title     String
+  notes     String   @db.Text
+  tags      Json     @default("[]") // Array of tag IDs
+  priority  String   @default("medium")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

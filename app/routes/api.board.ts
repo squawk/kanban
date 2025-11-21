@@ -19,6 +19,11 @@ export async function loader() {
                 createdAt: "asc",
               },
             },
+            tags: {
+              include: {
+                tag: true,
+              },
+            },
           },
         },
       },
@@ -46,12 +51,21 @@ export async function loader() {
           title: card.title,
           notes: card.notes,
           generatedPrompt: card.generatedPrompt || undefined,
+          dueDate: card.dueDate ? card.dueDate.toISOString() : undefined,
+          priority: card.priority,
           comments: card.comments.map((comment: any) => ({
             id: comment.id,
             content: comment.content,
             cardId: comment.cardId,
             createdAt: comment.createdAt.toISOString(),
             updatedAt: comment.updatedAt.toISOString(),
+          })),
+          tags: card.tags.map((cardTag: any) => ({
+            id: cardTag.tag.id,
+            name: cardTag.tag.name,
+            color: cardTag.tag.color,
+            createdAt: cardTag.tag.createdAt.toISOString(),
+            updatedAt: cardTag.tag.updatedAt.toISOString(),
           })),
           createdAt: card.createdAt.toISOString(),
           updatedAt: card.updatedAt.toISOString(),
