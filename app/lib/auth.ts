@@ -76,11 +76,11 @@ export async function createUser(email: string, password: string, name: string) 
     updatedAt: now,
   }).run();
 
-  // Create default columns
+  // Create default columns with fixed IDs to match expected behavior
   const defaultColumns = [
-    { id: nanoid(), title: "To Do", position: 0 },
-    { id: nanoid(), title: "In Progress", position: 1 },
-    { id: nanoid(), title: "Completed", position: 2 },
+    { id: "todo", title: "To Do", position: 0 },
+    { id: "in-progress", title: "In Progress", position: 1 },
+    { id: "completed", title: "Completed", position: 2 },
   ];
 
   for (const col of defaultColumns) {
