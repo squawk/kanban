@@ -3,6 +3,8 @@ import { KanbanBoard } from "~/components/KanbanBoard";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "~/components/ui/button";
+import { useTheme } from "~/lib/theme";
+import { Palette } from "lucide-react";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -21,6 +23,7 @@ export default function Home() {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     // Check if user is authenticated
@@ -72,6 +75,16 @@ export default function Home() {
             <span className="text-muted-foreground text-sm">
               Welcome, <span className="font-medium text-foreground">{user.name}</span>
             </span>
+            <Button
+              onClick={toggleTheme}
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              title={`Switch to ${theme === "modern" ? "vintage" : "modern"} theme`}
+            >
+              <Palette className="h-4 w-4" />
+              <span className="hidden sm:inline">{theme === "modern" ? "Vintage" : "Modern"}</span>
+            </Button>
             <Button
               onClick={handleLogout}
               variant="outline"

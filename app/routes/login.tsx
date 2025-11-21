@@ -3,9 +3,12 @@ import { useNavigate } from "react-router";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
+import { useTheme } from "~/lib/theme";
+import { Palette } from "lucide-react";
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -47,7 +50,21 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 relative">
+      {/* Theme Toggle */}
+      <div className="absolute top-4 right-4">
+        <Button
+          onClick={toggleTheme}
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          title={`Switch to ${theme === "modern" ? "vintage" : "modern"} theme`}
+        >
+          <Palette className="h-4 w-4" />
+          <span className="hidden sm:inline">{theme === "modern" ? "Vintage" : "Modern"}</span>
+        </Button>
+      </div>
+
       <div className="w-full max-w-md">
         <div className="bg-card rounded-lg shadow-lg border-2 border-border p-8">
           <div className="text-center mb-8">

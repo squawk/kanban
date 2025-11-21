@@ -1,12 +1,52 @@
-@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  :root {
-    /* Vintage Paper Color Palette */
+  /* Modern Theme (Default) */
+  :root,
+  [data-theme="modern"] {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
+    --radius: 0.5rem;
+
+    /* Chart colors */
+    --chart-1: 221 83% 53%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+
+    /* Sidebar */
+    --sidebar: 210 40% 96%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 221 83% 53%;
+    --sidebar-primary-foreground: 210 40% 98%;
+
+    /* Font family for modern theme */
+    --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-heading: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  /* Vintage Paper Theme */
+  [data-theme="vintage"] {
     --background: 44 47% 93%;
     --foreground: 29 16% 25%;
     --card: 42 100% 98%;
@@ -26,7 +66,6 @@
     --border: 41 32% 80%;
     --input: 41 32% 80%;
     --ring: 30 34% 49%;
-    --radius: 0.5rem;
 
     /* Chart colors */
     --chart-1: 30 34% 49%;
@@ -40,10 +79,37 @@
     --sidebar-foreground: 29 16% 25%;
     --sidebar-primary: 30 34% 49%;
     --sidebar-primary-foreground: 0 0% 100%;
+
+    /* Font family for vintage theme */
+    --font-sans: 'Source Sans 3', sans-serif;
+    --font-heading: 'Libre Baskerville', serif;
   }
 
-  .dark {
-    /* Dark mode - slightly darker vintage feel */
+  /* Dark mode variants */
+  .dark,
+  [data-theme="modern"].dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 13%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 13%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 11%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 224 76% 48%;
+  }
+
+  [data-theme="vintage"].dark {
     --background: 30 15% 12%;
     --foreground: 40 30% 90%;
     --card: 30 15% 15%;
@@ -63,13 +129,11 @@
     --border: 30 15% 25%;
     --input: 30 15% 25%;
     --ring: 30 34% 55%;
-    --chart-1: 30 40% 55%;
-    --chart-2: 30 30% 50%;
-    --chart-3: 30 35% 45%;
-    --chart-4: 30 30% 60%;
-    --chart-5: 30 25% 65%;
   }
 }
+
+/* Import Google Fonts for vintage theme */
+@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@400;500;600;700&display=swap');
 
 @layer base {
   * {
@@ -77,15 +141,15 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: 'Source Sans 3', sans-serif;
+    font-family: var(--font-sans);
   }
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Libre Baskerville', serif;
+    font-family: var(--font-heading);
   }
 }
 
-/* Paper texture effect */
-.paper-texture {
+/* Paper texture effect for vintage theme */
+[data-theme="vintage"] .paper-texture {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
   background-blend-mode: soft-light;
   opacity: 0.4;
