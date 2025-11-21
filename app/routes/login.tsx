@@ -47,14 +47,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="w-full max-w-md">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border-2 border-gray-300 dark:border-gray-600 p-8">
+        <div className="bg-card rounded-lg shadow-lg border-2 border-border p-8">
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+            <h1 className="text-3xl font-bold text-foreground mb-2">
               Kanban Board
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">
+            <p className="text-muted-foreground">
               {isLogin ? "Welcome back! Sign in to continue." : "Create an account to get started."}
             </p>
           </div>
@@ -100,14 +100,14 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-sm p-3 rounded-lg border border-red-200 dark:border-red-800">
+              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg border border-destructive/20">
                 {error}
               </div>
             )}
 
             <Button
               type="submit"
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+              className="w-full"
               disabled={loading}
             >
               {loading ? "Loading..." : isLogin ? "Sign In" : "Create Account"}
@@ -121,7 +121,7 @@ export default function LoginPage() {
                 setIsLogin(!isLogin);
                 setError("");
               }}
-              className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 text-sm font-medium"
+              className="text-primary hover:text-primary/80 text-sm font-medium underline underline-offset-4"
             >
               {isLogin
                 ? "Don't have an account? Sign up"
@@ -130,7 +130,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="text-center text-gray-400 text-sm mt-6">
+        <p className="text-center text-muted-foreground text-sm mt-6">
           Organize your projects with ease
         </p>
       </div>

@@ -34,20 +34,20 @@ export function KanbanColumn({
 
   return (
     <div className="flex-shrink-0 w-80">
-      <div className="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950 rounded-xl p-4 shadow-sm border-2 border-gray-300 dark:border-gray-600">
+      <div className="bg-card rounded-lg p-4 shadow-sm border-2 border-border">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <h3 className="font-bold text-gray-900 dark:text-gray-100">
+            <h3 className="font-bold text-foreground">
               {column.title}
             </h3>
-            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 px-2 py-0.5 rounded-full">
+            <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
               {cards.length}
             </span>
           </div>
           {isDeletable && onDeleteColumn && (
             <button
               onClick={() => onDeleteColumn(column.id)}
-              className="p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              className="p-1 rounded-md hover:bg-destructive/10 transition-colors"
               aria-label="Delete column"
             >
               <svg
@@ -60,7 +60,7 @@ export function KanbanColumn({
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className="text-red-600 dark:text-red-400"
+                className="text-destructive"
               >
                 <path d="M3 6h18" />
                 <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
@@ -92,7 +92,7 @@ export function KanbanColumn({
 
         <Button
           variant="ghost"
-          className="w-full mt-3 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-white dark:hover:bg-gray-800 transition-all"
+          className="w-full mt-3 text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
           onClick={() => onAddCard(column.id)}
         >
           <svg

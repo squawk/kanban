@@ -50,7 +50,7 @@ export function PromptDialog({
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="text-purple-600"
+              className="text-primary"
             >
               <path d="M12 8V4H8" />
               <rect width="16" height="12" x="4" y="8" rx="2" />
@@ -66,27 +66,27 @@ export function PromptDialog({
         <div className="py-4">
           {isLoading && (
             <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
-              <span className="ml-3 text-gray-600 dark:text-gray-400">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <span className="ml-3 text-muted-foreground">
                 Generating prompt...
               </span>
             </div>
           )}
 
           {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-              <p className="text-sm text-red-800 dark:text-red-400">{error}</p>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+              <p className="text-sm text-destructive">{error}</p>
             </div>
           )}
 
           {!isLoading && !error && prompt && (
             <div className="space-y-3">
-              <div className="bg-gradient-to-br from-purple-50 to-blue-50 dark:from-gray-800 dark:to-gray-900 border border-purple-200/50 dark:border-purple-700/50 rounded-lg p-4">
-                <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
+              <div className="bg-muted border border-border rounded-lg p-4">
+                <p className="text-sm text-foreground whitespace-pre-wrap">
                   {prompt}
                 </p>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
+              <p className="text-xs text-muted-foreground">
                 Copy this prompt and paste it into Claude Code to implement the feature
               </p>
             </div>
@@ -100,7 +100,6 @@ export function PromptDialog({
             </Button>
             <Button
               onClick={handleCopy}
-              className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
             >
               {copied ? (
                 <>
