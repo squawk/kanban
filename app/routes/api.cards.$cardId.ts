@@ -15,7 +15,25 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   try {
     if (request.method === "PUT") {
-      const { title, notes, generatedPrompt } = await request.json();
+      const { title, notes, generatedPrompt, dueDate, priority, tagIds } = await request.json();
+
+      // If tagIds are provided, update the tags
+      if (tagIds !== undefined) {
+        // Delete existing tags
+        await prisma.cardTag.deleteMany({
+          where: { cardId },
+        });
+
+        // Create new tags if provided
+        if (tagIds && tagIds.length > 0) {
+          await prisma.cardTag.createMany({
+            data: tagIds.map((tagId: string) => ({
+              cardId,
+              tagId,
+            })),
+          });
+        }
+      }
 
       const card = await prisma.card.update({
         where: { id: cardId },
@@ -23,6 +41,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           ...(title !== undefined && { title }),
           ...(notes !== undefined && { notes }),
           ...(generatedPrompt !== undefined && { generatedPrompt }),
+          ...(dueDate !== undefined && { dueDate: dueDate ? new Date(dueDate) : null }),
+          ...(priority !== undefined && { priority }),
         },
       });
 

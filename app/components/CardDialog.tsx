@@ -9,15 +9,20 @@ import {
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
-import type { Comment } from "~/lib/types";
-import { MessageSquare, Send } from "lucide-react";
+import type { Comment, Tag, KanbanCard } from "~/lib/types";
+import { MessageSquare, Send, Calendar, Tag as TagIcon, AlertCircle } from "lucide-react";
 
 interface CardDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (title: string, notes: string) => void;
-  initialTitle?: string;
-  initialNotes?: string;
+  onSave: (data: {
+    title: string;
+    notes: string;
+    dueDate?: string;
+    priority: 'low' | 'medium' | 'high';
+    tagIds: string[];
+  }) => void;
+  initialCard?: KanbanCard;
   cardId?: string;
 }
 
@@ -25,29 +30,59 @@ export function CardDialog({
   open,
   onOpenChange,
   onSave,
-  initialTitle = "",
-  initialNotes = "",
+  initialCard,
   cardId,
 }: CardDialogProps) {
-  const [title, setTitle] = useState(initialTitle);
-  const [notes, setNotes] = useState(initialNotes);
+  const [title, setTitle] = useState("");
+  const [notes, setNotes] = useState("");
+  const [dueDate, setDueDate] = useState<string>("");
+  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
   const [loadingComments, setLoadingComments] = useState(false);
   const [addingComment, setAddingComment] = useState(false);
 
-  useEffect(() => {
-    setTitle(initialTitle);
-    setNotes(initialNotes);
+  const [availableTags, setAvailableTags] = useState<Tag[]>([]);
+  const [loadingTags, setLoadingTags] = useState(false);
 
-    // Fetch comments when editing an existing card
-    if (open && cardId) {
-      fetchComments();
-    } else {
-      setComments([]);
-      setNewComment("");
+  useEffect(() => {
+    if (open) {
+      // Load available tags
+      fetchTags();
+
+      // Set initial values
+      setTitle(initialCard?.title || "");
+      setNotes(initialCard?.notes || "");
+      setDueDate(initialCard?.dueDate ? initialCard.dueDate.split('T')[0] : "");
+      setPriority(initialCard?.priority || 'medium');
+      setSelectedTagIds(initialCard?.tags?.map(t => t.id) || []);
+
+      // Fetch comments when editing an existing card
+      if (cardId) {
+        fetchComments();
+      } else {
+        setComments([]);
+        setNewComment("");
+      }
     }
-  }, [initialTitle, initialNotes, open, cardId]);
+  }, [initialCard, open, cardId]);
+
+  const fetchTags = async () => {
+    setLoadingTags(true);
+    try {
+      const response = await fetch("/api/tags");
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableTags(data);
+      }
+    } catch (error) {
+      console.error("Error fetching tags:", error);
+    } finally {
+      setLoadingTags(false);
+    }
+  };
 
   const fetchComments = async () => {
     if (!cardId) return;
@@ -94,17 +129,39 @@ export function CardDialog({
 
   const handleSave = () => {
     if (title.trim()) {
-      onSave(title.trim(), notes.trim());
-      setTitle("");
-      setNotes("");
-      setComments([]);
-      setNewComment("");
+      onSave({
+        title: title.trim(),
+        notes: notes.trim(),
+        dueDate: dueDate || undefined,
+        priority,
+        tagIds: selectedTagIds,
+      });
+      handleClose();
     }
+  };
+
+  const handleClose = () => {
+    setTitle("");
+    setNotes("");
+    setDueDate("");
+    setPriority('medium');
+    setSelectedTagIds([]);
+    setComments([]);
+    setNewComment("");
+    onOpenChange(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       handleSave();
+    }
+  };
+
+  const toggleTag = (tagId: string) => {
+    if (selectedTagIds.includes(tagId)) {
+      setSelectedTagIds(selectedTagIds.filter(id => id !== tagId));
+    } else {
+      setSelectedTagIds([...selectedTagIds, tagId]);
     }
   };
 
@@ -119,20 +176,26 @@ export function CardDialog({
     });
   };
 
+  const getPriorityColor = (p: string) => {
+    switch (p) {
+      case 'high': return 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/20 dark:text-red-400 dark:border-red-700';
+      case 'low': return 'bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-700';
+      default: return 'bg-yellow-100 text-yellow-700 border-yellow-300 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-700';
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {initialTitle ? "Edit Card" : "Create New Card"}
+            {initialCard ? "Edit Card" : "Create New Card"}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
+          {/* Title */}
           <div className="space-y-2">
-            <label
-              htmlFor="title"
-              className="text-sm font-medium text-gray-900 dark:text-gray-100"
-            >
+            <label htmlFor="title" className="text-sm font-medium text-gray-900 dark:text-gray-100">
               Title
             </label>
             <Input
@@ -144,11 +207,78 @@ export function CardDialog({
               autoFocus
             />
           </div>
+
+          {/* Priority and Due Date Row */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Priority */}
+            <div className="space-y-2">
+              <label htmlFor="priority" className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                Priority
+              </label>
+              <select
+                id="priority"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as 'low' | 'medium' | 'high')}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-sm"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+
+            {/* Due Date */}
+            <div className="space-y-2">
+              <label htmlFor="dueDate" className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-1">
+                <Calendar className="h-3 w-3" />
+                Due Date
+              </label>
+              <Input
+                id="dueDate"
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Tags */}
           <div className="space-y-2">
-            <label
-              htmlFor="notes"
-              className="text-sm font-medium text-gray-900 dark:text-gray-100"
-            >
+            <label className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-1">
+              <TagIcon className="h-3 w-3" />
+              Tags
+            </label>
+            {loadingTags ? (
+              <p className="text-sm text-gray-500">Loading tags...</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {availableTags.map((tag) => (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    onClick={() => toggleTag(tag.id)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                      selectedTagIds.includes(tag.id)
+                        ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-gray-900'
+                        : 'opacity-60 hover:opacity-100'
+                    }`}
+                    style={{
+                      backgroundColor: selectedTagIds.includes(tag.id) ? tag.color : `${tag.color}40`,
+                      color: selectedTagIds.includes(tag.id) ? 'white' : tag.color,
+                      ringColor: tag.color,
+                    }}
+                  >
+                    {tag.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Notes */}
+          <div className="space-y-2">
+            <label htmlFor="notes" className="text-sm font-medium text-gray-900 dark:text-gray-100">
               Notes
             </label>
             <Textarea
@@ -222,10 +352,7 @@ export function CardDialog({
           </p>
         </div>
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
+          <Button variant="outline" onClick={handleClose}>
             Cancel
           </Button>
           <Button
@@ -233,7 +360,7 @@ export function CardDialog({
             disabled={!title.trim()}
             className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
           >
-            {initialTitle ? "Update" : "Create"}
+            {initialCard ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
