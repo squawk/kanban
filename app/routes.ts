@@ -6,7 +6,14 @@ import {
 
 export default [
   index("routes/home.tsx"),
+  route("login", "routes/login.tsx"),
   route("about", "routes/about.tsx"),
+  // Auth routes
+  route("api/auth/register", "routes/api.auth.register.ts"),
+  route("api/auth/login", "routes/api.auth.login.ts"),
+  route("api/auth/logout", "routes/api.auth.logout.ts"),
+  route("api/auth/me", "routes/api.auth.me.ts"),
+  // Board routes
   route("api/generate-prompt", "routes/api.generate-prompt.ts"),
   route("api/board", "routes/api.board.ts"),
   route("api/cards", "routes/api.cards.ts"),

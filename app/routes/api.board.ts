@@ -1,51 +1,74 @@
-import type { Route } from "./+types/api.board";
-import { prisma } from "~/lib/prisma";
+import { db } from "~/lib/db";
+import { boards, columns, cards, comments, cardTags, tags } from "~/lib/db/schema";
+import { eq, asc } from "drizzle-orm";
+import { getSession, getUserBoard } from "~/lib/auth";
 
 // GET /api/board - Get the kanban board with all columns and cards
-export async function loader() {
+export async function loader({ request }: { request: Request }) {
   try {
-    // Get the first board (we only have one board for now)
-    const board = await prisma.board.findFirst({
-      include: {
-        columns: {
-          orderBy: {
-            position: "asc",
-          },
-        },
-        cards: {
-          include: {
-            comments: {
-              orderBy: {
-                createdAt: "asc",
-              },
-            },
-            tags: {
-              include: {
-                tag: true,
-              },
-            },
-          },
-        },
-      },
-    });
+    const session = await getSession(request);
+
+    if (!session.userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Get user's board
+    const board = getUserBoard(session.userId);
 
     if (!board) {
       return new Response(
-        JSON.stringify({ error: "Board not found. Please run database seeding." }),
+        JSON.stringify({ error: "Board not found. Please contact support." }),
         { status: 404, headers: { "Content-Type": "application/json" } }
       );
     }
 
+    // Get columns for this board
+    const boardColumns = db
+      .select()
+      .from(columns)
+      .where(eq(columns.boardId, board.id))
+      .orderBy(asc(columns.position))
+      .all();
+
+    // Get cards for this board
+    const boardCards = db
+      .select()
+      .from(cards)
+      .where(eq(cards.boardId, board.id))
+      .all();
+
+    // Get comments for all cards
+    const cardIds = boardCards.map((c) => c.id);
+    const allComments = cardIds.length > 0
+      ? db.select().from(comments).all().filter((c) => cardIds.includes(c.cardId))
+      : [];
+
+    // Get card tags
+    const allCardTags = cardIds.length > 0
+      ? db.select().from(cardTags).all().filter((ct) => cardIds.includes(ct.cardId))
+      : [];
+
+    // Get all tags
+    const allTags = db.select().from(tags).all();
+    const tagMap = new Map(allTags.map((t) => [t.id, t]));
+
     // Transform the data to match our client-side format
     const transformedBoard = {
-      columns: board.columns.map((col: any) => ({
+      columns: boardColumns.map((col) => ({
         id: col.id,
         title: col.title,
-        cardIds: Array.isArray(col.cardIds)
-          ? col.cardIds
-          : JSON.parse(col.cardIds as string),
+        cardIds: JSON.parse(col.cardIds),
       })),
-      cards: board.cards.reduce((acc: any, card: any) => {
+      cards: boardCards.reduce((acc, card) => {
+        const cardComments = allComments.filter((c) => c.cardId === card.id);
+        const cardTagRelations = allCardTags.filter((ct) => ct.cardId === card.id);
+        const cardTagList = cardTagRelations
+          .map((ct) => tagMap.get(ct.tagId))
+          .filter((t): t is NonNullable<typeof t> => t !== undefined);
+
         acc[card.id] = {
           id: card.id,
           title: card.title,
@@ -53,19 +76,19 @@ export async function loader() {
           generatedPrompt: card.generatedPrompt || undefined,
           dueDate: card.dueDate ? card.dueDate.toISOString() : undefined,
           priority: card.priority,
-          comments: card.comments.map((comment: any) => ({
+          comments: cardComments.map((comment) => ({
             id: comment.id,
             content: comment.content,
             cardId: comment.cardId,
             createdAt: comment.createdAt.toISOString(),
             updatedAt: comment.updatedAt.toISOString(),
           })),
-          tags: card.tags.map((cardTag: any) => ({
-            id: cardTag.tag.id,
-            name: cardTag.tag.name,
-            color: cardTag.tag.color,
-            createdAt: cardTag.tag.createdAt.toISOString(),
-            updatedAt: cardTag.tag.updatedAt.toISOString(),
+          tags: cardTagList.map((tag) => ({
+            id: tag.id,
+            name: tag.name,
+            color: tag.color,
+            createdAt: tag.createdAt.toISOString(),
+            updatedAt: tag.updatedAt.toISOString(),
           })),
           createdAt: card.createdAt.toISOString(),
           updatedAt: card.updatedAt.toISOString(),
@@ -87,17 +110,22 @@ export async function loader() {
 }
 
 // PUT /api/board - Update the entire board structure (for drag and drop)
-export async function action({ request }: Route.ActionArgs) {
+export async function action({ request }: { request: Request }) {
   if (request.method !== "PUT") {
     return new Response("Method not allowed", { status: 405 });
   }
 
   try {
-    const { columns } = await request.json();
+    const session = await getSession(request);
 
-    // Get the first board
-    const board = await prisma.board.findFirst();
+    if (!session.userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
+    const board = getUserBoard(session.userId);
     if (!board) {
       return new Response(
         JSON.stringify({ error: "Board not found" }),
@@ -105,18 +133,20 @@ export async function action({ request }: Route.ActionArgs) {
       );
     }
 
+    const { columns: newColumns } = await request.json();
+
     // Update all columns with their new cardIds
-    await Promise.all(
-      columns.map((column: any, index: number) =>
-        prisma.column.update({
-          where: { id: column.id },
-          data: {
-            cardIds: JSON.stringify(column.cardIds),
-            position: index,
-          },
+    for (let i = 0; i < newColumns.length; i++) {
+      const col = newColumns[i];
+      db.update(columns)
+        .set({
+          cardIds: JSON.stringify(col.cardIds),
+          position: i,
+          updatedAt: new Date(),
         })
-      )
-    );
+        .where(eq(columns.id, col.id))
+        .run();
+    }
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { "Content-Type": "application/json" },
