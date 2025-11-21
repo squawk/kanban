@@ -10,7 +10,7 @@ import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
 import type { Comment, Tag, KanbanCard } from "~/lib/types";
-import { MessageSquare, Send, Calendar, Tag as TagIcon, AlertCircle } from "lucide-react";
+import { MessageSquare, Send, Calendar, Tag as TagIcon, AlertCircle, Plus } from "lucide-react";
 
 interface CardDialogProps {
   open: boolean;
@@ -46,6 +46,12 @@ export function CardDialog({
 
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [loadingTags, setLoadingTags] = useState(false);
+
+  // New tag creation
+  const [showNewTagInput, setShowNewTagInput] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState("#3b82f6");
+  const [creatingTag, setCreatingTag] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -165,6 +171,43 @@ export function CardDialog({
     }
   };
 
+  const handleCreateTag = async () => {
+    if (!newTagName.trim()) return;
+
+    setCreatingTag(true);
+    try {
+      const response = await fetch("/api/tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newTagName.trim(),
+          color: newTagColor,
+        }),
+      });
+
+      if (response.ok) {
+        const newTag = await response.json();
+        // Add to available tags
+        setAvailableTags([...availableTags, newTag]);
+        // Auto-select the new tag
+        setSelectedTagIds([...selectedTagIds, newTag.id]);
+        // Reset form
+        setNewTagName("");
+        setNewTagColor("#3b82f6");
+        setShowNewTagInput(false);
+      } else {
+        const error = await response.json();
+        console.error("Error creating tag:", error);
+        alert(error.error || "Failed to create tag");
+      }
+    } catch (error) {
+      console.error("Error creating tag:", error);
+      alert("Failed to create tag");
+    } finally {
+      setCreatingTag(false);
+    }
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleString("en-US", {
@@ -245,34 +288,96 @@ export function CardDialog({
 
           {/* Tags */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-1">
-              <TagIcon className="h-3 w-3" />
-              Tags
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-1">
+                <TagIcon className="h-3 w-3" />
+                Tags
+              </label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setShowNewTagInput(!showNewTagInput)}
+                className="h-7 text-xs"
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                New Tag
+              </Button>
+            </div>
+
             {loadingTags ? (
               <p className="text-sm text-gray-500">Loading tags...</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {availableTags.map((tag) => (
-                  <button
-                    key={tag.id}
-                    type="button"
-                    onClick={() => toggleTag(tag.id)}
-                    className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
-                      selectedTagIds.includes(tag.id)
-                        ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-gray-900'
-                        : 'opacity-60 hover:opacity-100'
-                    }`}
-                    style={{
-                      backgroundColor: selectedTagIds.includes(tag.id) ? tag.color : `${tag.color}40`,
-                      color: selectedTagIds.includes(tag.id) ? 'white' : tag.color,
-                      ringColor: tag.color,
-                    }}
-                  >
-                    {tag.name}
-                  </button>
-                ))}
-              </div>
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {availableTags.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => toggleTag(tag.id)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                        selectedTagIds.includes(tag.id)
+                          ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-gray-900'
+                          : 'opacity-60 hover:opacity-100'
+                      }`}
+                      style={{
+                        backgroundColor: selectedTagIds.includes(tag.id) ? tag.color : `${tag.color}40`,
+                        color: selectedTagIds.includes(tag.id) ? 'white' : tag.color,
+                        ringColor: tag.color,
+                      }}
+                    >
+                      {tag.name}
+                    </button>
+                  ))}
+                </div>
+
+                {/* New Tag Creation */}
+                {showNewTagInput && (
+                  <div className="border-2 border-gray-300 dark:border-gray-600 rounded-lg p-3 space-y-2 bg-gray-50 dark:bg-gray-800">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Tag name..."
+                        value={newTagName}
+                        onChange={(e) => setNewTagName(e.target.value)}
+                        className="flex-1"
+                        disabled={creatingTag}
+                      />
+                      <input
+                        type="color"
+                        value={newTagColor}
+                        onChange={(e) => setNewTagColor(e.target.value)}
+                        className="w-12 h-9 rounded border-2 border-gray-300 dark:border-gray-600 cursor-pointer"
+                        title="Choose tag color"
+                        disabled={creatingTag}
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleCreateTag}
+                        disabled={!newTagName.trim() || creatingTag}
+                        className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
+                      >
+                        {creatingTag ? "Creating..." : "Create Tag"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setShowNewTagInput(false);
+                          setNewTagName("");
+                          setNewTagColor("#3b82f6");
+                        }}
+                        disabled={creatingTag}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

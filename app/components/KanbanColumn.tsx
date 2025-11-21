@@ -34,7 +34,7 @@ export function KanbanColumn({
 
   return (
     <div className="flex-shrink-0 w-80">
-      <div className="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950 rounded-xl p-4 shadow-sm border border-gray-200/50 dark:border-gray-800/50">
+      <div className="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950 rounded-xl p-4 shadow-sm border-2 border-gray-300 dark:border-gray-600">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <h3 className="font-bold text-gray-900 dark:text-gray-100">
