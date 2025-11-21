@@ -11,7 +11,7 @@ export async function loader() {
     });
 
     // Transform JSON fields
-    const transformedTemplates = templates.map((template) => ({
+    const transformedTemplates = templates.map((template: any) => ({
       ...template,
       tags: Array.isArray(template.tags)
         ? template.tags

@@ -56,7 +56,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       const columns = await prisma.column.findMany();
 
       await Promise.all(
-        columns.map(async (column) => {
+        columns.map(async (column: any) => {
           const cardIds = Array.isArray(column.cardIds)
             ? column.cardIds
             : JSON.parse(column.cardIds as string);

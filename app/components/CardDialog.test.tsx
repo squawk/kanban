@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CardDialog } from "./CardDialog";
+import type { KanbanCard } from "~/lib/types";
 
 describe("CardDialog", () => {
   it("should render create mode when no initial values", () => {
@@ -18,13 +19,22 @@ describe("CardDialog", () => {
   });
 
   it("should render edit mode with initial values", () => {
+    const mockCard: KanbanCard = {
+      id: "test-card-1",
+      title: "Test Title",
+      notes: "Test Notes",
+      priority: "medium",
+      createdAt: "2024-01-01T00:00:00.000Z",
+      updatedAt: "2024-01-01T00:00:00.000Z",
+    };
+
     render(
       <CardDialog
         open={true}
         onOpenChange={vi.fn()}
         onSave={vi.fn()}
-        initialTitle="Test Title"
-        initialNotes="Test Notes"
+        initialCard={mockCard}
+        cardId="test-card-1"
       />
     );
 
@@ -54,7 +64,13 @@ describe("CardDialog", () => {
     await user.type(notesInput, "Task description");
     await user.click(createButton);
 
-    expect(onSave).toHaveBeenCalledWith("New Task", "Task description");
+    expect(onSave).toHaveBeenCalledWith({
+      title: "New Task",
+      notes: "Task description",
+      dueDate: undefined,
+      priority: "medium",
+      tagIds: [],
+    });
   });
 
   it("should not call onSave when title is empty", async () => {

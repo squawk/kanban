@@ -38,14 +38,14 @@ export async function loader() {
 
     // Transform the data to match our client-side format
     const transformedBoard = {
-      columns: board.columns.map((col) => ({
+      columns: board.columns.map((col: any) => ({
         id: col.id,
         title: col.title,
         cardIds: Array.isArray(col.cardIds)
           ? col.cardIds
           : JSON.parse(col.cardIds as string),
       })),
-      cards: board.cards.reduce((acc, card: any) => {
+      cards: board.cards.reduce((acc: any, card: any) => {
         acc[card.id] = {
           id: card.id,
           title: card.title,

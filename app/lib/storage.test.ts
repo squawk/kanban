@@ -28,6 +28,7 @@ describe("storage utilities", () => {
             id: "card-1",
             title: "Test Card",
             notes: "Test notes",
+            priority: "medium",
             createdAt: "2024-01-01",
             updatedAt: "2024-01-01",
           },
