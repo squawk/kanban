@@ -8,6 +8,7 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import { ThemeProvider } from "~/lib/theme";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -28,7 +29,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function Root() {
-  return <Outlet />;
+  return (
+    <ThemeProvider>
+      <Outlet />
+    </ThemeProvider>
+  );
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
@@ -37,10 +42,17 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   let stack: string | undefined;
 
   if (error instanceof Error) {
-    message = error.message;
-    stack = error.stack;
+    // SECURITY FIX: Only show generic message to users, log details server-side
+    message = "Something went wrong";
+    details = "Please try again later or contact support if the problem persists.";
+    // Only show stack traces in development
+    if (process.env.NODE_ENV !== "production") {
+      stack = error.stack;
+    }
+    // Log the actual error server-side for debugging
+    console.error("Application error:", error.message);
   } else if (typeof error === "string") {
-    details = error;
+    details = "Please try again later.";
   }
 
   return (

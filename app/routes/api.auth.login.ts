@@ -1,8 +1,16 @@
 import { findUserByEmail, verifyPassword, getSessionWithResponse } from "~/lib/auth";
+import { checkRateLimit, rateLimitResponse, getClientIP, isValidEmail, INPUT_LIMITS } from "~/lib/security";
 
 export async function action({ request }: { request: Request }) {
   if (request.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
+  }
+
+  // Rate limiting to prevent brute force attacks
+  const clientIP = getClientIP(request);
+  const rateLimit = checkRateLimit(clientIP, "auth");
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.retryAfter!);
   }
 
   try {
@@ -12,6 +20,21 @@ export async function action({ request }: { request: Request }) {
     if (!email || !password) {
       return new Response(
         JSON.stringify({ error: "Email and password are required" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Input validation
+    if (!isValidEmail(email)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid email format" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    if (password.length > INPUT_LIMITS.password) {
+      return new Response(
+        JSON.stringify({ error: "Invalid credentials" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
@@ -70,7 +93,8 @@ export async function action({ request }: { request: Request }) {
 
     return response;
   } catch (error) {
-    console.error("Login error:", error);
+    // Log sanitized error info server-side only
+    console.error("Login error:", error instanceof Error ? error.message : "Unknown error");
     return new Response(
       JSON.stringify({ error: "Failed to login" }),
       { status: 500, headers: { "Content-Type": "application/json" } }

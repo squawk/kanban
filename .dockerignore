@@ -141,5 +141,9 @@ vite.config.ts.timestamp-*
 # React Router build output
 build/
 .react-router/
-data.db*
-prisma/dev.db*
+data.db
+
+
+# sqlite3 database
+dev.db
+prisma/dev.db
