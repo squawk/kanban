@@ -15,21 +15,31 @@ export interface SessionData {
   name?: string;
 }
 
-// Validate SESSION_SECRET in production
-const SESSION_SECRET = process.env.SESSION_SECRET;
-if (process.env.NODE_ENV === "production" && !SESSION_SECRET) {
-  throw new Error("SESSION_SECRET environment variable is required in production");
-}
+// Session options - require SESSION_SECRET in production
+const getSessionSecret = (): string => {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("SESSION_SECRET environment variable is required in production");
+    }
+    // Development-only fallback with warning
+    console.warn("⚠️  WARNING: Using default session secret. Set SESSION_SECRET env var for production.");
+    return "dev_only_secret_32_chars_minimum_length";
+  }
+  if (secret.length < 32) {
+    throw new Error("SESSION_SECRET must be at least 32 characters");
+  }
+  return secret;
+};
 
-// Session options
 const sessionOptions: SessionOptions = {
-  password: SESSION_SECRET || "development_only_secret_min_32_chars_long!!",
+  password: getSessionSecret(),
   cookieName: "kanban_session",
   cookieOptions: {
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 7, // 1 week
+    sameSite: "strict", // Upgraded from "lax" for better CSRF protection
+    maxAge: 60 * 60 * 24, // 24 hours (reduced from 1 week)
   },
 };
 

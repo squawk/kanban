@@ -53,7 +53,16 @@ COPY --from=build /app /app
 
 # Setup sqlite3 on a separate volume
 RUN mkdir -p /data
+
+# SECURITY: Create non-root user and set permissions
+RUN groupadd --gid 1000 appgroup && \
+    useradd --uid 1000 --gid 1000 --shell /bin/bash appuser && \
+    chown -R appuser:appgroup /app /data
+
 VOLUME /data
+
+# SECURITY: Run as non-root user
+USER appuser
 
 # Entrypoint prepares the database.
 ENTRYPOINT [ "/app/docker-entrypoint.js" ]
