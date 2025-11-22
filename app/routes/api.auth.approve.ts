@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import {
   getFullUser,
   setUserApproved,
@@ -6,13 +7,47 @@ import {
 } from "~/lib/auth";
 import { sendApprovalNotificationEmail } from "~/lib/email";
 
+const ADMIN_SECRET = process.env.ADMIN_APPROVAL_SECRET || process.env.SESSION_SECRET;
+
+// Generate HMAC token for approval URL
+export function generateApprovalToken(userId: string, action: string): string {
+  if (!ADMIN_SECRET) {
+    throw new Error("ADMIN_APPROVAL_SECRET or SESSION_SECRET must be configured");
+  }
+  const data = `${userId}:${action}`;
+  return crypto.createHmac("sha256", ADMIN_SECRET).update(data).digest("hex");
+}
+
+// Verify HMAC token
+function verifyApprovalToken(userId: string, action: string, token: string): boolean {
+  if (!ADMIN_SECRET) return false;
+  const expectedToken = generateApprovalToken(userId, action);
+  // Use timing-safe comparison to prevent timing attacks
+  try {
+    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expectedToken));
+  } catch {
+    return false;
+  }
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 // Handle GET requests from email links
 export async function loader({ request }: { request: Request }) {
   const url = new URL(request.url);
   const userId = url.searchParams.get("userId");
   const action = url.searchParams.get("action");
+  const token = url.searchParams.get("token");
 
-  if (!userId || !action) {
+  if (!userId || !action || !token) {
     return new Response(
       generateHtmlResponse("Error", "Missing required parameters.", false),
       { status: 400, headers: { "Content-Type": "text/html" } }
@@ -26,12 +61,28 @@ export async function loader({ request }: { request: Request }) {
     );
   }
 
+  // Verify the HMAC token
+  if (!verifyApprovalToken(userId, action, token)) {
+    return new Response(
+      generateHtmlResponse("Error", "Invalid or expired approval link.", false),
+      { status: 403, headers: { "Content-Type": "text/html" } }
+    );
+  }
+
   try {
     const user = getFullUser(userId);
     if (!user) {
       return new Response(
         generateHtmlResponse("Error", "User not found.", false),
         { status: 404, headers: { "Content-Type": "text/html" } }
+      );
+    }
+
+    // Check if already processed
+    if (user.approved && action === "approve") {
+      return new Response(
+        generateHtmlResponse("Already Processed", "This user has already been approved.", true),
+        { status: 200, headers: { "Content-Type": "text/html" } }
       );
     }
 
@@ -48,7 +99,7 @@ export async function loader({ request }: { request: Request }) {
       return new Response(
         generateHtmlResponse(
           "User Approved",
-          `${user.name} (${user.email}) has been approved and notified.`,
+          `${escapeHtml(user.name)} (${escapeHtml(user.email)}) has been approved and notified.`,
           true
         ),
         { status: 200, headers: { "Content-Type": "text/html" } }
@@ -63,7 +114,7 @@ export async function loader({ request }: { request: Request }) {
       return new Response(
         generateHtmlResponse(
           "User Rejected",
-          `${user.name} (${user.email}) has been rejected and their account has been removed.`,
+          `${escapeHtml(user.name)} (${escapeHtml(user.email)}) has been rejected and their account has been removed.`,
           true
         ),
         { status: 200, headers: { "Content-Type": "text/html" } }
@@ -80,11 +131,13 @@ export async function loader({ request }: { request: Request }) {
 
 function generateHtmlResponse(title: string, message: string, success: boolean): string {
   const color = success ? "#10b981" : "#ef4444";
+  // Title is controlled by us, message may contain escaped user data
+  const safeTitle = escapeHtml(title);
   return `
 <!DOCTYPE html>
 <html>
 <head>
-  <title>${title} - Kanban Board</title>
+  <title>${safeTitle} - Kanban Board</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
@@ -116,7 +169,7 @@ function generateHtmlResponse(title: string, message: string, success: boolean):
 </head>
 <body>
   <div class="card">
-    <h1>${title}</h1>
+    <h1>${safeTitle}</h1>
     <p>${message}</p>
   </div>
 </body>
