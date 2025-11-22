@@ -15,9 +15,15 @@ export interface SessionData {
   name?: string;
 }
 
-// Session options - in production, use a proper secret from env vars
+// Validate SESSION_SECRET in production
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (process.env.NODE_ENV === "production" && !SESSION_SECRET) {
+  throw new Error("SESSION_SECRET environment variable is required in production");
+}
+
+// Session options
 const sessionOptions: SessionOptions = {
-  password: process.env.SESSION_SECRET || "complex_password_at_least_32_characters_long_for_iron_session",
+  password: SESSION_SECRET || "development_only_secret_min_32_chars_long!!",
   cookieName: "kanban_session",
   cookieOptions: {
     secure: process.env.NODE_ENV === "production",

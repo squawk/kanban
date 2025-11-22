@@ -1,10 +1,11 @@
 import sgMail from "@sendgrid/mail";
+import { generateApprovalToken } from "~/routes/api.auth.approve";
 
 // Initialize SendGrid with API key
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@example.com";
 const APP_URL = process.env.APP_URL || "http://localhost:5173";
-const ADMIN_EMAIL = "brad@vanskyhawk.com";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "brad@vanskyhawk.com";
 
 if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);
@@ -12,6 +13,16 @@ if (SENDGRID_API_KEY) {
 
 function isEmailConfigured(): boolean {
   return !!SENDGRID_API_KEY;
+}
+
+// Escape HTML to prevent XSS in emails
+function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 export async function sendVerificationEmail(
@@ -24,6 +35,7 @@ export async function sendVerificationEmail(
     return false;
   }
 
+  const safeName = escapeHtml(name);
   const verificationUrl = `${APP_URL}/verify-email?token=${token}`;
 
   const msg = {
@@ -34,7 +46,7 @@ export async function sendVerificationEmail(
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #333;">Verify your email</h2>
-        <p>Hi ${name},</p>
+        <p>Hi ${safeName},</p>
         <p>Please verify your email by clicking the button below:</p>
         <p style="margin: 30px 0;">
           <a href="${verificationUrl}"
@@ -67,6 +79,7 @@ export async function sendPasswordResetEmail(
     return false;
   }
 
+  const safeName = escapeHtml(name);
   const resetUrl = `${APP_URL}/reset-password?token=${token}`;
 
   const msg = {
@@ -77,7 +90,7 @@ export async function sendPasswordResetEmail(
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #333;">Reset your password</h2>
-        <p>Hi ${name},</p>
+        <p>Hi ${safeName},</p>
         <p>You requested to reset your password. Click the button below:</p>
         <p style="margin: 30px 0;">
           <a href="${resetUrl}"
@@ -110,8 +123,15 @@ export async function sendAdminApprovalEmail(
     return false;
   }
 
-  const approveUrl = `${APP_URL}/api/auth/approve?userId=${userId}&action=approve`;
-  const rejectUrl = `${APP_URL}/api/auth/approve?userId=${userId}&action=reject`;
+  const safeName = escapeHtml(userName);
+  const safeEmail = escapeHtml(userEmail);
+
+  // Generate secure HMAC tokens for approve/reject actions
+  const approveToken = generateApprovalToken(userId, "approve");
+  const rejectToken = generateApprovalToken(userId, "reject");
+
+  const approveUrl = `${APP_URL}/api/auth/approve?userId=${userId}&action=approve&token=${approveToken}`;
+  const rejectUrl = `${APP_URL}/api/auth/approve?userId=${userId}&action=reject&token=${rejectToken}`;
 
   const msg = {
     to: ADMIN_EMAIL,
@@ -123,8 +143,8 @@ export async function sendAdminApprovalEmail(
         <h2 style="color: #333;">New User Registration</h2>
         <p>A new user has registered and is awaiting your approval:</p>
         <div style="background-color: #f3f4f6; padding: 16px; border-radius: 8px; margin: 20px 0;">
-          <p style="margin: 4px 0;"><strong>Name:</strong> ${userName}</p>
-          <p style="margin: 4px 0;"><strong>Email:</strong> ${userEmail}</p>
+          <p style="margin: 4px 0;"><strong>Name:</strong> ${safeName}</p>
+          <p style="margin: 4px 0;"><strong>Email:</strong> ${safeEmail}</p>
         </div>
         <p style="margin: 30px 0;">
           <a href="${approveUrl}"
@@ -159,6 +179,7 @@ export async function sendApprovalNotificationEmail(
     return false;
   }
 
+  const safeName = escapeHtml(name);
   const loginUrl = `${APP_URL}/login`;
 
   const msg = {
@@ -174,7 +195,7 @@ export async function sendApprovalNotificationEmail(
       ? `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #10b981;">Account Approved!</h2>
-          <p>Hi ${name},</p>
+          <p>Hi ${safeName},</p>
           <p>Great news! Your account has been approved. You can now log in and start using the Kanban Board.</p>
           <p style="margin: 30px 0;">
             <a href="${loginUrl}"
@@ -187,7 +208,7 @@ export async function sendApprovalNotificationEmail(
       : `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #333;">Account Registration Update</h2>
-          <p>Hi ${name},</p>
+          <p>Hi ${safeName},</p>
           <p>Unfortunately, your account registration was not approved at this time.</p>
           <p>If you believe this was a mistake, please contact the administrator.</p>
         </div>
