@@ -5,6 +5,10 @@ const prisma = new PrismaClient();
 async function main() {
   console.log("Start seeding...");
 
+  // Clear existing data
+  await prisma.board.deleteMany();
+  await prisma.tag.deleteMany();
+
   // Create default tags
   const tags = await Promise.all([
     prisma.tag.create({
