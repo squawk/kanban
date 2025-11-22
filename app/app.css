@@ -151,7 +151,7 @@
     font-family: var(--font-sans);
   }
   body {
-    @apply bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900;
+    background: linear-gradient(to bottom right, #0f172a, #581c87, #0f172a);
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-heading);
