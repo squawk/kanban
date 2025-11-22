@@ -12,15 +12,31 @@ export interface SessionData {
   name?: string;
 }
 
-// Session options - in production, use a proper secret from env vars
+// Session options - require SESSION_SECRET in production
+const getSessionSecret = (): string => {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("SESSION_SECRET environment variable is required in production");
+    }
+    // Development-only fallback with warning
+    console.warn("⚠️  WARNING: Using default session secret. Set SESSION_SECRET env var for production.");
+    return "dev_only_secret_32_chars_minimum_length";
+  }
+  if (secret.length < 32) {
+    throw new Error("SESSION_SECRET must be at least 32 characters");
+  }
+  return secret;
+};
+
 const sessionOptions: SessionOptions = {
-  password: process.env.SESSION_SECRET || "complex_password_at_least_32_characters_long_for_iron_session",
+  password: getSessionSecret(),
   cookieName: "kanban_session",
   cookieOptions: {
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 7, // 1 week
+    sameSite: "strict", // Upgraded from "lax" for better CSRF protection
+    maxAge: 60 * 60 * 24, // 24 hours (reduced from 1 week)
   },
 };
 

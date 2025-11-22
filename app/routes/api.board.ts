@@ -1,6 +1,6 @@
 import { db } from "~/lib/db";
 import { boards, columns, cards, comments, cardTags, tags } from "~/lib/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, and } from "drizzle-orm";
 import { getSession, getUserBoard } from "~/lib/auth";
 
 // GET /api/board - Get the kanban board with all columns and cards
@@ -135,16 +135,63 @@ export async function action({ request }: { request: Request }) {
 
     const { columns: newColumns } = await request.json();
 
-    // Update all columns with their new cardIds
+    // Validate input
+    if (!Array.isArray(newColumns)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request format" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // SECURITY FIX: Verify all columns belong to user's board before updating
     for (let i = 0; i < newColumns.length; i++) {
       const col = newColumns[i];
+
+      // Validate column structure
+      if (!col.id || !Array.isArray(col.cardIds)) {
+        return new Response(
+          JSON.stringify({ error: "Invalid column format" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Verify column belongs to user's board
+      const existingColumn = db.select()
+        .from(columns)
+        .where(and(eq(columns.id, col.id), eq(columns.boardId, board.id)))
+        .get();
+
+      if (!existingColumn) {
+        return new Response(
+          JSON.stringify({ error: "Column not found or access denied" }),
+          { status: 403, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Validate cardIds are strings and belong to user's board
+      for (const cardId of col.cardIds) {
+        if (typeof cardId !== "string") {
+          return new Response(
+            JSON.stringify({ error: "Invalid card ID format" }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        const card = db.select().from(cards).where(eq(cards.id, cardId)).get();
+        if (card && card.boardId !== board.id) {
+          return new Response(
+            JSON.stringify({ error: "Card access denied" }),
+            { status: 403, headers: { "Content-Type": "application/json" } }
+          );
+        }
+      }
+
       db.update(columns)
         .set({
           cardIds: JSON.stringify(col.cardIds),
           position: i,
           updatedAt: new Date(),
         })
-        .where(eq(columns.id, col.id))
+        .where(and(eq(columns.id, col.id), eq(columns.boardId, board.id)))
         .run();
     }
 

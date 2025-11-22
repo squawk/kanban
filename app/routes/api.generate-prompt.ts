@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import type { Route } from "./+types/api.generate-prompt";
+import { getSession } from "~/lib/auth";
+import { checkRateLimit, rateLimitResponse, INPUT_LIMITS } from "~/lib/security";
 
 export async function action({ request }: Route.ActionArgs) {
   if (request.method !== "POST") {
@@ -7,7 +9,36 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   try {
+    // SECURITY FIX: Require authentication to prevent unauthorized API abuse
+    const session = await getSession(request);
+    if (!session.userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Rate limiting to prevent OpenAI API cost abuse
+    const rateLimit = checkRateLimit(session.userId, "openai");
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit.retryAfter!);
+    }
+
     const { title, notes } = await request.json();
+
+    // Input length validation
+    if (title && title.length > INPUT_LIMITS.cardTitle) {
+      return new Response(
+        JSON.stringify({ error: "Title too long" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    if (notes && notes.length > INPUT_LIMITS.cardNotes) {
+      return new Response(
+        JSON.stringify({ error: "Notes too long" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     if (!title) {
       return new Response(
