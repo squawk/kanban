@@ -1,5 +1,14 @@
-import { createUser, findUserByEmail, getSessionWithResponse } from "~/lib/auth";
 import { checkRateLimit, rateLimitResponse, getClientIP, isValidEmail, validatePassword, INPUT_LIMITS } from "~/lib/security";
+import {
+  createUser,
+  findUserByEmail,
+  createEmailVerificationToken,
+  verifyRecaptcha,
+} from "~/lib/auth";
+import {
+  sendVerificationEmail,
+  sendAdminApprovalEmail,
+} from "~/lib/email";
 
 export async function action({ request }: { request: Request }) {
   if (request.method !== "POST") {
@@ -14,7 +23,7 @@ export async function action({ request }: { request: Request }) {
   }
 
   try {
-    const { email, password, name } = await request.json();
+    const { email, password, name, recaptchaToken } = await request.json();
 
     // Validation
     if (!email || !password || !name) {
@@ -49,7 +58,18 @@ export async function action({ request }: { request: Request }) {
       );
     }
 
-    // Check if user already exists (use generic message to prevent user enumeration)
+    // Verify reCAPTCHA
+    if (recaptchaToken) {
+      const isValidCaptcha = await verifyRecaptcha(recaptchaToken);
+      if (!isValidCaptcha) {
+        return new Response(
+          JSON.stringify({ error: "reCAPTCHA verification failed. Please try again." }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // Check if user already exists
     const existingUser = findUserByEmail(email);
     if (existingUser) {
       // Use same delay as successful registration to prevent timing attacks
@@ -60,22 +80,25 @@ export async function action({ request }: { request: Request }) {
       );
     }
 
-    // Create user
+    // Create user (not verified or approved yet)
     const user = await createUser(email, password, name);
 
-    // Create session
-    const response = new Response(
-      JSON.stringify({ user: { id: user.id, email: user.email, name: user.name } }),
+    // Create verification token and send email
+    const verificationToken = createEmailVerificationToken(user.id);
+    await sendVerificationEmail(email, name, verificationToken);
+
+    // Send admin approval notification
+    await sendAdminApprovalEmail(user.id, email, name);
+
+    // Return success - user needs to verify email and wait for approval
+    return new Response(
+      JSON.stringify({
+        message: "Registration successful! Please check your email to verify your account. Your account will also need admin approval before you can log in.",
+        requiresVerification: true,
+        requiresApproval: true,
+      }),
       { status: 201, headers: { "Content-Type": "application/json" } }
     );
-
-    const session = await getSessionWithResponse(request, response);
-    session.userId = user.id;
-    session.email = user.email;
-    session.name = user.name;
-    await session.save();
-
-    return response;
   } catch (error) {
     // Log sanitized error info server-side only
     console.error("Registration error:", error instanceof Error ? error.message : "Unknown error");

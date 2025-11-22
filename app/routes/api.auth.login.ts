@@ -57,6 +57,28 @@ export async function action({ request }: { request: Request }) {
       );
     }
 
+    // Check if email is verified
+    if (!user.emailVerified) {
+      return new Response(
+        JSON.stringify({
+          error: "Please verify your email before logging in. Check your inbox for the verification link.",
+          code: "EMAIL_NOT_VERIFIED",
+        }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Check if account is approved
+    if (!user.approved) {
+      return new Response(
+        JSON.stringify({
+          error: "Your account is pending admin approval. You will receive an email once approved.",
+          code: "ACCOUNT_NOT_APPROVED",
+        }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     // Create session
     const response = new Response(
       JSON.stringify({ user: { id: user.id, email: user.email, name: user.name } }),

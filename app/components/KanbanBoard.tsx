@@ -386,9 +386,9 @@ export function KanbanBoard() {
   return (
     <div className="flex-1">
       <div className="container mx-auto px-4 py-6">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4 sm:mb-6">
           <div>
-            <p className="text-muted-foreground">
+            <p className="hidden sm:block text-muted-foreground">
               Organize your projects with style
             </p>
           </div>
@@ -419,7 +419,7 @@ export function KanbanBoard() {
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-6 overflow-x-auto pb-4">
+          <div className="flex gap-4 sm:gap-6 overflow-x-auto pb-4 -mx-4 px-4 sm:mx-0 sm:px-0">
             {board.columns.map((column) => (
               <KanbanColumn
                 key={column.id}
