@@ -75,9 +75,12 @@
   * {
     @apply border-border;
   }
-  body {
-    @apply bg-background text-foreground;
+  html, body {
+    @apply min-h-screen text-foreground;
     font-family: 'Source Sans 3', sans-serif;
+  }
+  body {
+    @apply bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Libre Baskerville', serif;
