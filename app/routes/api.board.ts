@@ -15,14 +15,20 @@ export async function loader({ request }: { request: Request }) {
       );
     }
 
-    // Get user's board
-    const board = getUserBoard(session.userId);
+    // Get user's board, create if doesn't exist
+    let board = getUserBoard(session.userId);
 
     if (!board) {
-      return new Response(
-        JSON.stringify({ error: "Board not found. Please contact support." }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
+      // Create board for existing users who don't have one
+      const newBoard = createUserBoard(session.userId);
+      board = getUserBoard(session.userId);
+
+      if (!board) {
+        return new Response(
+          JSON.stringify({ error: "Failed to create board. Please contact support." }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Get columns for this board
