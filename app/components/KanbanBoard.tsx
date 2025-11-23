@@ -153,8 +153,8 @@ export function KanbanBoard() {
         body: JSON.stringify({ columns: newColumns }),
       });
 
-      // Trigger confetti if card is moved to completed column
-      if (overColumn.id === "completed" && activeColumn.id !== "completed") {
+      // Trigger confetti if card is moved to completed column (check by title)
+      if (overColumn.title.toLowerCase() === "completed" && activeColumn.title.toLowerCase() !== "completed") {
         confetti({
           particleCount: 100,
           spread: 70,
@@ -370,7 +370,8 @@ export function KanbanBoard() {
     }
   };
 
-  const defaultColumnIds = ["todo", "in-progress", "completed"];
+  // Default column titles that cannot be deleted
+  const defaultColumnTitles = ["to do", "in progress", "completed"];
 
   if (loading) {
     return (
@@ -432,7 +433,7 @@ export function KanbanBoard() {
                 onDeleteCard={handleDeleteCard}
                 onGeneratePrompt={handleGeneratePrompt}
                 onDeleteColumn={handleDeleteColumn}
-                isDeletable={!defaultColumnIds.includes(column.id)}
+                isDeletable={!defaultColumnTitles.includes(column.title.toLowerCase())}
               />
             ))}
           </div>

@@ -288,16 +288,16 @@ export function createUserBoard(userId: string) {
     updatedAt: now,
   }).run();
 
-  // Create default columns with fixed IDs for confetti to work
+  // Create default columns with unique IDs per user
   const defaultColumns = [
-    { id: "todo", title: "To Do", position: 0 },
-    { id: "in-progress", title: "In Progress", position: 1 },
-    { id: "completed", title: "Completed", position: 2 },
+    { title: "To Do", position: 0 },
+    { title: "In Progress", position: 1 },
+    { title: "Completed", position: 2 },
   ];
 
   for (const col of defaultColumns) {
     db.insert(columns).values({
-      id: col.id,
+      id: nanoid(),
       title: col.title,
       position: col.position,
       boardId,
