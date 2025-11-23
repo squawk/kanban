@@ -67,6 +67,29 @@
     --chart-4: 30 30% 60%;
     --chart-5: 30 25% 65%;
   }
+
+  /* Modern theme - dark purple palette */
+  [data-theme="modern"] {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 14%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 14%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 270 60% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 270 30% 25%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 222 30% 20%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 270 40% 30%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 270 20% 30%;
+    --input: 270 20% 30%;
+    --ring: 270 60% 60%;
+  }
 }
 
 @layer base {
@@ -77,7 +100,13 @@
     @apply min-h-screen text-foreground;
     font-family: 'Source Sans 3', sans-serif;
   }
+  /* Vintage theme - paper-like background */
+  [data-theme="vintage"] body,
   body {
+    background: hsl(var(--background));
+  }
+  /* Modern theme - purple gradient */
+  [data-theme="modern"] body {
     background: linear-gradient(to bottom right, #0f172a, #581c87, #0f172a);
   }
   h1, h2, h3, h4, h5, h6 {
