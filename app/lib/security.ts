@@ -91,10 +91,11 @@ export const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy": [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",  // unsafe-inline needed for React
-    "style-src 'self' 'unsafe-inline'",   // unsafe-inline needed for Tailwind
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",   // unsafe-inline needed for Tailwind, fonts for theme
     "img-src 'self' data: https:",
-    "font-src 'self'",
+    "font-src 'self' https://fonts.gstatic.com",  // Google Fonts
     "connect-src 'self' https://api.openai.com",
+    "worker-src 'self' blob:",  // Allow web workers from blob URLs (needed for canvas-confetti)
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
