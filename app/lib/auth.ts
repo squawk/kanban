@@ -32,7 +32,8 @@ const getSessionSecret = (): string => {
   return secret;
 };
 
-const sessionOptions: SessionOptions = {
+// Lazy-evaluate session options to access runtime env vars
+const getSessionOptions = (): SessionOptions => ({
   password: getSessionSecret(),
   cookieName: "kanban_session",
   cookieOptions: {
@@ -41,13 +42,13 @@ const sessionOptions: SessionOptions = {
     sameSite: "strict", // Upgraded from "lax" for better CSRF protection
     maxAge: 60 * 60 * 24, // 24 hours (reduced from 1 week)
   },
-};
+});
 
 // Get session from request
 export async function getSession(request: Request): Promise<IronSession<SessionData>> {
   // Create a mock response to get cookies
   const response = new Response();
-  const session = await getIronSession<SessionData>(request, response, sessionOptions);
+  const session = await getIronSession<SessionData>(request, response, getSessionOptions());
   return session;
 }
 
@@ -56,7 +57,7 @@ export async function getSessionWithResponse(
   request: Request,
   response: Response
 ): Promise<IronSession<SessionData>> {
-  return getIronSession<SessionData>(request, response, sessionOptions);
+  return getIronSession<SessionData>(request, response, getSessionOptions());
 }
 
 // Hash password
