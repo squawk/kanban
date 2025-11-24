@@ -55,8 +55,8 @@ COPY --from=build /app /app
 RUN mkdir -p /data
 
 # SECURITY: Create non-root user and set permissions
-RUN groupadd --gid 1000 appgroup && \
-    useradd --uid 1000 --gid 1000 --shell /bin/bash appuser && \
+RUN groupadd --gid 1001 appgroup && \
+    useradd --uid 1001 --gid 1001 --shell /bin/bash appuser && \
     chown -R appuser:appgroup /app /data
 
 VOLUME /data
