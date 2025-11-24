@@ -1,3 +1,6 @@
+/* Import Google Fonts for vintage theme */
+@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -161,9 +164,6 @@
     --ring: 270 60% 60%;
   }
 }
-
-/* Import Google Fonts for vintage theme */
-@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@400;500;600;700&display=swap');
 
 @layer base {
   * {

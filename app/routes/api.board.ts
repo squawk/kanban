@@ -1,7 +1,7 @@
 import { db } from "~/lib/db";
 import { boards, columns, cards, comments, cardTags, tags } from "~/lib/db/schema";
 import { eq, asc, and } from "drizzle-orm";
-import { getSession, getUserBoard } from "~/lib/auth";
+import { getSession, getUserBoard, createUserBoard } from "~/lib/auth";
 
 // GET /api/board - Get the kanban board with all columns and cards
 export async function loader({ request }: { request: Request }) {
