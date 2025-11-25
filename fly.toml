@@ -1,8 +1,4 @@
 
-
-[env]
-  NODE_ENV = "production"
-  DATABASE_PATH = "/data/data.db"
 # fly.toml app configuration file generated for kanban-purple on 2025-11-21T14:12:00-07:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
@@ -32,3 +28,8 @@ primary_region = 'sjc'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
+
+[env]
+  NODE_ENV = "production"
+  DATABASE_PATH = "/data/data.db"
+
