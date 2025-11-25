@@ -2,9 +2,18 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import path from "path";
+import fs from "fs";
 
-// Create database file in the project root
-const dbPath = path.join(process.cwd(), "data.db");
+// Use DATABASE_PATH env var if set (for production with persistent volume)
+// Otherwise use local data.db for development
+const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), "data.db");
+
+// Ensure the directory exists for the database file
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const sqlite = new Database(dbPath);
 
 // Enable WAL mode for better performance
