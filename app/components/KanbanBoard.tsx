@@ -154,7 +154,9 @@ export function KanbanBoard() {
       });
 
       // Trigger confetti if card is moved to completed column (check by title)
+      console.log(`Move detected: from "${activeColumn.title}" to "${overColumn.title}"`);
       if (overColumn.title.toLowerCase() === "completed" && activeColumn.title.toLowerCase() !== "completed") {
+        console.log('Triggering confetti for card moved to Completed');
         confetti({
           particleCount: 100,
           spread: 70,

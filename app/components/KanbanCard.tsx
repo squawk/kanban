@@ -43,8 +43,13 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
   };
 
   const formatDueDate = (dateString: string) => {
-    const date = new Date(dateString);
+    // Parse as local date to avoid timezone issues
+    // If it's an ISO string, extract just the date part
+    const datePart = dateString.split('T')[0];
+    const [year, month, day] = datePart.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
     const now = new Date();
+    now.setHours(0, 0, 0, 0); // Compare dates only, not times
     const isOverdue = date < now;
     const isToday = date.toDateString() === now.toDateString();
 
