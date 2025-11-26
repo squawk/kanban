@@ -21,6 +21,7 @@ import {
   KanbanColumn as KanbanColumnType,
   KanbanBoard as KanbanBoardType,
 } from "~/lib/types";
+import { apiFetch } from "~/lib/api";
 
 export function KanbanBoard() {
   const [board, setBoard] = useState<KanbanBoardType>({ columns: [], cards: {} });
@@ -52,7 +53,7 @@ export function KanbanBoard() {
 
   const fetchBoard = async () => {
     try {
-      const response = await fetch("/api/board");
+      const response = await apiFetch("/api/board");
       if (response.ok) {
         const data = await response.json();
         setBoard(data);
@@ -114,7 +115,7 @@ export function KanbanBoard() {
         }));
 
         // Save to database
-        await fetch("/api/board", {
+        await apiFetch("/api/board", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ columns: newColumns }),
@@ -147,7 +148,7 @@ export function KanbanBoard() {
       }));
 
       // Save to database
-      await fetch("/api/board", {
+      await apiFetch("/api/board", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ columns: newColumns }),
@@ -187,7 +188,7 @@ export function KanbanBoard() {
     if (editingCard) {
       // Update existing card
       try {
-        const response = await fetch(`/api/cards/${editingCard.id}`, {
+        const response = await apiFetch(`/api/cards/${editingCard.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -209,7 +210,7 @@ export function KanbanBoard() {
     } else if (targetColumnId) {
       // Create new card
       try {
-        const response = await fetch("/api/cards", {
+        const response = await apiFetch("/api/cards", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -238,7 +239,7 @@ export function KanbanBoard() {
 
   const handleDeleteCard = async (cardId: string) => {
     try {
-      const response = await fetch(`/api/cards/${cardId}`, {
+      const response = await apiFetch(`/api/cards/${cardId}`, {
         method: "DELETE",
       });
 
@@ -265,7 +266,7 @@ export function KanbanBoard() {
 
   const handleAddColumn = async (title: string) => {
     try {
-      const response = await fetch("/api/columns", {
+      const response = await apiFetch("/api/columns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),
@@ -284,7 +285,7 @@ export function KanbanBoard() {
 
   const handleDeleteColumn = async (columnId: string) => {
     try {
-      const response = await fetch(`/api/columns/${columnId}`, {
+      const response = await apiFetch(`/api/columns/${columnId}`, {
         method: "DELETE",
       });
 
@@ -318,7 +319,7 @@ export function KanbanBoard() {
     setGeneratedPrompt("");
 
     try {
-      const response = await fetch("/api/generate-prompt", {
+      const response = await apiFetch("/api/generate-prompt", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -338,7 +339,7 @@ export function KanbanBoard() {
       setGeneratedPrompt(data.prompt);
 
       // Save the generated prompt to the database
-      await fetch(`/api/cards/${card.id}`, {
+      await apiFetch(`/api/cards/${card.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
