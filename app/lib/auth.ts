@@ -2,9 +2,10 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getIronSession, type SessionOptions, type IronSession } from "iron-session";
 import { db } from "./db";
-import { users, boards, columns, tags, emailVerificationTokens, passwordResetTokens } from "./db/schema";
+import { users, boards, columns, tags, emailVerificationTokens, passwordResetTokens, loginTokens } from "./db/schema";
 import { eq, and, gt } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import * as OTPAuth from "otpauth";
 
 const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY;
 
@@ -318,4 +319,114 @@ export function getFullUser(userId: string) {
 // Delete user and all associated data
 export function deleteUser(userId: string) {
   db.delete(users).where(eq(users.id, userId)).run();
+}
+
+// ============================================================================
+// MAGIC LINK AUTHENTICATION
+// ============================================================================
+
+// Create a magic link token for passwordless login
+export function createMagicLinkToken(email: string): string {
+  const token = generateToken();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 15 * 60 * 1000); // 15 minutes
+
+  // Delete any existing tokens for this email
+  db.delete(loginTokens).where(eq(loginTokens.email, email.toLowerCase())).run();
+
+  // Create new token
+  db.insert(loginTokens).values({
+    id: nanoid(),
+    email: email.toLowerCase(),
+    token,
+    expiresAt,
+    createdAt: now,
+  }).run();
+
+  return token;
+}
+
+// Verify magic link token and return user email
+export function verifyMagicLinkToken(token: string): { email: string } | null {
+  const now = new Date();
+  const record = db.select()
+    .from(loginTokens)
+    .where(and(
+      eq(loginTokens.token, token),
+      gt(loginTokens.expiresAt, now)
+    ))
+    .get();
+
+  if (!record) return null;
+
+  // Delete the token after use
+  db.delete(loginTokens).where(eq(loginTokens.id, record.id)).run();
+
+  return { email: record.email };
+}
+
+// ============================================================================
+// TOTP MFA (Two-Factor Authentication)
+// ============================================================================
+
+// Generate a new TOTP secret for a user
+export function generateMFASecret(userId: string, email: string): { secret: string; qrCode: string } {
+  const secret = new OTPAuth.Secret({ size: 20 });
+  const totp = new OTPAuth.TOTP({
+    issuer: "Kanban Board",
+    label: email,
+    algorithm: "SHA1",
+    digits: 6,
+    period: 30,
+    secret: secret,
+  });
+
+  return {
+    secret: secret.base32,
+    qrCode: totp.toString(),
+  };
+}
+
+// Enable MFA for a user
+export function enableMFA(userId: string, secret: string) {
+  db.update(users)
+    .set({
+      mfaEnabled: true,
+      mfaSecret: secret,
+      updatedAt: new Date()
+    })
+    .where(eq(users.id, userId))
+    .run();
+}
+
+// Disable MFA for a user
+export function disableMFA(userId: string) {
+  db.update(users)
+    .set({
+      mfaEnabled: false,
+      mfaSecret: null,
+      updatedAt: new Date()
+    })
+    .where(eq(users.id, userId))
+    .run();
+}
+
+// Verify a TOTP code
+export function verifyTOTP(secret: string, token: string): boolean {
+  try {
+    const totp = new OTPAuth.TOTP({
+      issuer: "Kanban Board",
+      algorithm: "SHA1",
+      digits: 6,
+      period: 30,
+      secret: OTPAuth.Secret.fromBase32(secret),
+    });
+
+    // Verify with a window of ±1 period (30 seconds before/after)
+    const delta = totp.validate({ token, window: 1 });
+    return delta !== null;
+  } catch (error) {
+    console.error("TOTP verification error:", error);
+    return false;
+  }
 }

@@ -7,6 +7,8 @@ export const users = sqliteTable("users", {
   name: text("name").notNull(),
   emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
   approved: integer("approved", { mode: "boolean" }).notNull().default(false),
+  mfaEnabled: integer("mfa_enabled", { mode: "boolean" }).notNull().default(false),
+  mfaSecret: text("mfa_secret"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
@@ -22,6 +24,14 @@ export const emailVerificationTokens = sqliteTable("email_verification_tokens", 
 export const passwordResetTokens = sqliteTable("password_reset_tokens", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const loginTokens = sqliteTable("login_tokens", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
   token: text("token").notNull().unique(),
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
@@ -103,3 +113,4 @@ export type CardTag = typeof cardTags.$inferSelect;
 export type Template = typeof templates.$inferSelect;
 export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type LoginToken = typeof loginTokens.$inferSelect;

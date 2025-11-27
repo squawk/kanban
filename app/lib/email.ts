@@ -223,3 +223,45 @@ export async function sendApprovalNotificationEmail(
     return false;
   }
 }
+
+// Send magic link email for passwordless login
+export async function sendMagicLinkEmail(
+  email: string,
+  token: string
+): Promise<boolean> {
+  if (!isEmailConfigured()) {
+    console.warn("SendGrid not configured, skipping magic link email");
+    return false;
+  }
+
+  const magicLinkUrl = `${APP_URL}/auth/magic-link?token=${token}`;
+
+  const msg = {
+    to: email,
+    from: FROM_EMAIL,
+    subject: "Your login link - Kanban Board",
+    text: `Click the link below to log in to your Kanban Board account:\n\n${magicLinkUrl}\n\nThis link will expire in 15 minutes.\n\nIf you didn't request this link, you can safely ignore this email.`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #333;">Your Login Link</h2>
+        <p>Click the button below to log in to your Kanban Board account:</p>
+        <p style="margin: 30px 0;">
+          <a href="${magicLinkUrl}"
+             style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+            Log In
+          </a>
+        </p>
+        <p style="color: #666; font-size: 14px;">This link will expire in 15 minutes.</p>
+        <p style="color: #666; font-size: 14px;">If you didn't request this link, you can safely ignore this email.</p>
+      </div>
+    `,
+  };
+
+  try {
+    await sgMail.send(msg);
+    return true;
+  } catch (error) {
+    console.error("Error sending magic link email:", error);
+    return false;
+  }
+}

@@ -51,6 +51,14 @@ export function initializeDatabase() {
       created_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS login_tokens (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS boards (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL DEFAULT 'My Board',
@@ -126,6 +134,8 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_token ON email_verification_tokens(token);
     CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);
     CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token);
+    CREATE INDEX IF NOT EXISTS idx_login_tokens_email ON login_tokens(email);
+    CREATE INDEX IF NOT EXISTS idx_login_tokens_token ON login_tokens(token);
   `);
 
   // Add new columns to existing users table if they don't exist
@@ -136,6 +146,16 @@ export function initializeDatabase() {
   }
   try {
     sqlite.exec(`ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists
+  }
+  try {
+    sqlite.exec(`ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists
+  }
+  try {
+    sqlite.exec(`ALTER TABLE users ADD COLUMN mfa_secret TEXT`);
   } catch {
     // Column already exists
   }
