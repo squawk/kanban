@@ -31,6 +31,14 @@ export default function LoginPage() {
   const recaptchaRef = useRef<HTMLDivElement>(null);
   const recaptchaWidgetId = useRef<number | null>(null);
 
+  // MFA state
+  const [requiresMFA, setRequiresMFA] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaEmail, setMfaEmail] = useState("");
+
+  // Magic link state
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+
   // Check for session expired message
   const sessionExpired = searchParams.get("session") === "expired";
 
@@ -111,6 +119,14 @@ export default function LoginPage() {
       }
 
       if (isLogin) {
+        // Check if MFA is required
+        if (data.requiresMFA) {
+          setRequiresMFA(true);
+          setMfaEmail(data.email);
+          setError("");
+          return;
+        }
+
         // Redirect to original page or home after successful login
         const redirectPath = sessionStorage.getItem('redirectAfterLogin') || '/';
         sessionStorage.removeItem('redirectAfterLogin');
@@ -133,6 +149,67 @@ export default function LoginPage() {
     }
   };
 
+  const handleMFAVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const response = await fetch("/api/auth/mfa/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: mfaEmail, code: mfaCode }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || "Invalid code");
+        return;
+      }
+
+      // Redirect to original page or home after successful MFA
+      const redirectPath = sessionStorage.getItem('redirectAfterLogin') || '/';
+      sessionStorage.removeItem('redirectAfterLogin');
+      navigate(redirectPath);
+    } catch (err) {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMagicLink = async () => {
+    if (!email) {
+      setError("Please enter your email address");
+      return;
+    }
+
+    setError("");
+    setLoading(true);
+
+    try {
+      const response = await fetch("/api/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setMagicLinkSent(true);
+        setSuccess(data.message || "Check your email for a login link!");
+      } else {
+        setError(data.error || "Failed to send magic link");
+      }
+    } catch (err) {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -142,7 +219,9 @@ export default function LoginPage() {
               Kanban Board
             </h1>
             <p className="text-muted-foreground">
-              {isLogin ? "Welcome back! Sign in to continue." : "Create an account to get started."}
+              {requiresMFA
+                ? "Enter your authentication code"
+                : (isLogin ? "Welcome back! Sign in to continue." : "Create an account to get started.")}
             </p>
           </div>
 
@@ -158,7 +237,58 @@ export default function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {/* MFA Verification Form */}
+          {requiresMFA && (
+            <form onSubmit={handleMFAVerify} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="mfaCode">Authentication Code</Label>
+                <Input
+                  id="mfaCode"
+                  type="text"
+                  placeholder="Enter 6-digit code"
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value)}
+                  required
+                  maxLength={6}
+                  pattern="[0-9]{6}"
+                  autoComplete="one-time-code"
+                />
+                <p className="text-sm text-muted-foreground">
+                  Enter the code from your authenticator app
+                </p>
+              </div>
+
+              {error && (
+                <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg border border-destructive/20">
+                  {error}
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={loading}
+              >
+                {loading ? "Verifying..." : "Verify Code"}
+              </Button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRequiresMFA(false);
+                  setMfaCode("");
+                  setError("");
+                }}
+                className="w-full text-sm text-primary hover:text-primary/80 underline underline-offset-4"
+              >
+                Back to login
+              </button>
+            </form>
+          )}
+
+          {/* Regular Login/Register Form */}
+          {!requiresMFA && (
+            <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && (
               <div className="space-y-2">
                 <Label htmlFor="name">Name</Label>
@@ -269,8 +399,49 @@ export default function LoginPage() {
             >
               {loading ? "Loading..." : isLogin ? "Sign In" : "Create Account"}
             </Button>
-          </form>
 
+            {/* Magic Link Button (Login Only) */}
+            {isLogin && !magicLinkSent && (
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">Or</span>
+                </div>
+              </div>
+            )}
+
+            {isLogin && !magicLinkSent && (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={handleMagicLink}
+                disabled={loading}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="mr-2"
+                >
+                  <rect width="20" height="16" x="2" y="4" rx="2" />
+                  <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                </svg>
+                Email me a login link
+              </Button>
+            )}
+          </form>
+          )}
+
+          {!requiresMFA && (
           <div className="mt-6 text-center">
             <button
               type="button"
@@ -288,6 +459,7 @@ export default function LoginPage() {
                 : "Already have an account? Sign in"}
             </button>
           </div>
+          )}
         </div>
 
         <p className="text-center text-muted-foreground text-sm mt-6">

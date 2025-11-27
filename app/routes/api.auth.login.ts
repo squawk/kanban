@@ -56,6 +56,18 @@ export async function action({ request }: { request: Request }) {
       );
     }
 
+    // Check if MFA is enabled
+    if (user.mfaEnabled) {
+      return new Response(
+        JSON.stringify({
+          requiresMFA: true,
+          email: user.email,
+          message: "Please enter your authentication code",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     // Create session
     const response = new Response(
       JSON.stringify({ user: { id: user.id, email: user.email, name: user.name } }),

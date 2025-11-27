@@ -1,7 +1,7 @@
 import type { Route } from "./+types/home";
 import { KanbanBoard } from "~/components/KanbanBoard";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, Link } from "react-router";
 import { Button } from "~/components/ui/button";
 
 export function meta({}: Route.MetaArgs) {
@@ -72,6 +72,11 @@ export default function Home() {
             <span className="hidden sm:inline text-muted-foreground text-sm">
               Welcome, <span className="font-medium text-foreground">{user.name}</span>
             </span>
+            <Link to="/settings">
+              <Button variant="outline" size="sm">
+                Settings
+              </Button>
+            </Link>
             <Button
               onClick={handleLogout}
               variant="outline"
