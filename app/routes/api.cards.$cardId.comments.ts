@@ -15,7 +15,25 @@ export async function loader({ request, params }: { request: Request; params: { 
       );
     }
 
+    // SECURITY FIX: Verify card belongs to user's board before returning comments
+    const board = getUserBoard(session.userId);
+    if (!board) {
+      return new Response(
+        JSON.stringify({ error: "Board not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const { cardId } = params;
+
+    // Verify card exists and belongs to user's board
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get();
+    if (!card || card.boardId !== board.id) {
+      return new Response(
+        JSON.stringify({ error: "Card not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     const cardComments = db
       .select()
