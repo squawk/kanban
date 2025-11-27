@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate, Link } from "react-router";
+import { useNavigate, Link, useSearchParams } from "react-router";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -20,6 +20,7 @@ const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { theme, toggleTheme } = useTheme();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
@@ -32,6 +33,9 @@ export default function LoginPage() {
   const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
   const recaptchaRef = useRef<HTMLDivElement>(null);
   const recaptchaWidgetId = useRef<number | null>(null);
+
+  // Check for session expired message
+  const sessionExpired = searchParams.get("session") === "expired";
 
   // Load reCAPTCHA script
   useEffect(() => {
@@ -110,8 +114,10 @@ export default function LoginPage() {
       }
 
       if (isLogin) {
-        // Redirect to home page on successful login
-        navigate("/");
+        // Redirect to original page or home after successful login
+        const redirectPath = sessionStorage.getItem('redirectAfterLogin') || '/';
+        sessionStorage.removeItem('redirectAfterLogin');
+        navigate(redirectPath);
       } else {
         // Show success message for registration
         setSuccess(data.message || "Registration successful! Please check your email.");
@@ -156,6 +162,12 @@ export default function LoginPage() {
               {isLogin ? "Welcome back! Sign in to continue." : "Create an account to get started."}
             </p>
           </div>
+
+          {sessionExpired && (
+            <div className="bg-amber-500/10 text-amber-700 dark:text-amber-400 text-sm p-4 rounded-lg border border-amber-500/20 mb-4">
+              Your session has expired. Please log in again to continue.
+            </div>
+          )}
 
           {success && (
             <div className="bg-green-500/10 text-green-700 dark:text-green-400 text-sm p-4 rounded-lg border border-green-500/20 mb-4">
