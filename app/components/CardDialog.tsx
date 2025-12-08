@@ -9,8 +9,8 @@ import {
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
-import type { Comment, Tag, KanbanCard } from "~/lib/types";
-import { MessageSquare, Send, Calendar, Tag as TagIcon, AlertCircle, Plus } from "lucide-react";
+import type { Comment, Tag, KanbanCard, KanbanColumn } from "~/lib/types";
+import { MessageSquare, Send, Calendar, Tag as TagIcon, AlertCircle, Plus, Columns } from "lucide-react";
 
 interface CardDialogProps {
   open: boolean;
@@ -24,6 +24,9 @@ interface CardDialogProps {
   }) => void;
   initialCard?: KanbanCard;
   cardId?: string;
+  columns?: KanbanColumn[];
+  currentColumnId?: string;
+  onColumnChange?: (columnId: string) => void;
 }
 
 export function CardDialog({
@@ -32,6 +35,9 @@ export function CardDialog({
   onSave,
   initialCard,
   cardId,
+  columns,
+  currentColumnId,
+  onColumnChange,
 }: CardDialogProps) {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -285,6 +291,28 @@ export function CardDialog({
               />
             </div>
           </div>
+
+          {/* Status - Only show when editing existing card */}
+          {cardId && columns && columns.length > 0 && onColumnChange && (
+            <div className="space-y-2">
+              <label htmlFor="status" className="text-sm font-medium text-foreground flex items-center gap-1">
+                <Columns className="h-3 w-3" />
+                Status
+              </label>
+              <select
+                id="status"
+                value={currentColumnId || ''}
+                onChange={(e) => onColumnChange(e.target.value)}
+                className="w-full px-3 py-2 border-2 border-border rounded-md bg-card text-foreground text-sm"
+              >
+                {columns.map((column) => (
+                  <option key={column.id} value={column.id}>
+                    {column.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Tags */}
           <div className="space-y-2">
