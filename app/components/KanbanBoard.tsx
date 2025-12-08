@@ -176,8 +176,60 @@ export function KanbanBoard() {
 
   const handleEditCard = (card: KanbanCardType) => {
     setEditingCard(card);
-    setTargetColumnId(null);
+    // Find the column this card belongs to
+    const column = board.columns.find(col => col.cardIds.includes(card.id));
+    setTargetColumnId(column?.id || null);
     setIsCardDialogOpen(true);
+  };
+
+  const handleColumnChange = async (newColumnId: string) => {
+    if (!editingCard || !targetColumnId || newColumnId === targetColumnId) return;
+
+    const sourceColumn = board.columns.find(col => col.id === targetColumnId);
+    const destColumn = board.columns.find(col => col.id === newColumnId);
+
+    if (!sourceColumn || !destColumn) return;
+
+    // Build new columns array with card moved
+    const newColumns = board.columns.map((col) => {
+      if (col.id === targetColumnId) {
+        return {
+          ...col,
+          cardIds: col.cardIds.filter((id) => id !== editingCard.id),
+        };
+      }
+      if (col.id === newColumnId) {
+        return {
+          ...col,
+          cardIds: [...col.cardIds, editingCard.id],
+        };
+      }
+      return col;
+    });
+
+    // Update local state
+    setBoard((prev) => ({
+      ...prev,
+      columns: newColumns,
+    }));
+    setTargetColumnId(newColumnId);
+
+    // Save to database
+    await apiFetch("/api/board", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ columns: newColumns }),
+    });
+
+    // Trigger confetti if card is moved to completed column
+    if (destColumn.title.toLowerCase() === "completed" && sourceColumn.title.toLowerCase() !== "completed") {
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#60a5fa', '#a78bfa', '#f472b6'],
+      });
+    }
   };
 
   const handleSaveCard = async (data: {
@@ -462,6 +514,9 @@ export function KanbanBoard() {
         onSave={handleSaveCard}
         initialCard={editingCard || undefined}
         cardId={editingCard?.id}
+        columns={board.columns}
+        currentColumnId={targetColumnId || undefined}
+        onColumnChange={handleColumnChange}
       />
 
       <ColumnDialog
