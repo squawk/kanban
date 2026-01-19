@@ -8,7 +8,7 @@ import { Palette } from "lucide-react";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "Vibe Coding Kanban" },
+    { title: "Kanban Board" },
     { name: "description", content: "A beautiful project management kanban board" },
   ];
 }
