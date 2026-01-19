@@ -2,7 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { KanbanCard as KanbanCardType } from "~/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { MessageSquare, Calendar, AlertCircle } from "lucide-react";
+import { MessageSquare, Calendar } from "lucide-react";
 
 interface KanbanCardProps {
   card: KanbanCardType;
@@ -29,16 +29,8 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case 'high': return 'border-l-destructive';
-      case 'low': return 'border-l-primary/50';
+      case 'low': return 'border-l-muted';
       default: return 'border-l-primary';
-    }
-  };
-
-  const getPriorityIcon = (priority: string) => {
-    switch (priority) {
-      case 'high': return <AlertCircle className="h-3 w-3 text-destructive" />;
-      case 'low': return <AlertCircle className="h-3 w-3 text-primary/50" />;
-      default: return <AlertCircle className="h-3 w-3 text-primary" />;
     }
   };
 
@@ -70,7 +62,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
       {...attributes}
       {...listeners}
     >
-      <Card className={`mb-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:scale-[1.02] bg-card border-2 border-border border-l-4 ${getPriorityColor(card.priority)}`}>
+      <Card className={`mb-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:scale-[1.02] bg-card border-2 border-border border-l-8 ${getPriorityColor(card.priority)}`}>
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="text-sm font-semibold text-foreground line-clamp-2">
@@ -179,14 +171,9 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
             </p>
           )}
 
-          {/* Footer with due date, priority, and comments */}
+          {/* Footer with due date and comments */}
           <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
             <div className="flex items-center gap-2">
-              {/* Priority indicator */}
-              <div className="flex items-center gap-0.5" title={`Priority: ${card.priority}`}>
-                {getPriorityIcon(card.priority)}
-              </div>
-
               {/* Due date */}
               {dueInfo && (
                 <div

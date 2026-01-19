@@ -42,7 +42,7 @@ FROM base
 
 # Install packages needed for deployment
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y ca-certificates openssl wget && \
+    apt-get install --no-install-recommends -y ca-certificates openssl wget sqlite3 && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Install litestream

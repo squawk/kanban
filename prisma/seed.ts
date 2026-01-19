@@ -18,13 +18,22 @@ async function main() {
       data: { name: "Feature", color: "#3b82f6" }, // blue
     }),
     prisma.tag.create({
-      data: { name: "Urgent", color: "#f59e0b" }, // orange
+      data: { name: "Blocked", color: "#dc2626" }, // dark red
     }),
     prisma.tag.create({
-      data: { name: "Enhancement", color: "#8b5cf6" }, // purple
+      data: { name: "Quick Win", color: "#10b981" }, // green
     }),
     prisma.tag.create({
-      data: { name: "Documentation", color: "#10b981" }, // green
+      data: { name: "Research", color: "#8b5cf6" }, // purple
+    }),
+    prisma.tag.create({
+      data: { name: "Review", color: "#f59e0b" }, // orange
+    }),
+    prisma.tag.create({
+      data: { name: "Enhancement", color: "#06b6d4" }, // cyan
+    }),
+    prisma.tag.create({
+      data: { name: "Documentation", color: "#84cc16" }, // lime
     }),
     prisma.tag.create({
       data: { name: "Design", color: "#ec4899" }, // pink
