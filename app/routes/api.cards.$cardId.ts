@@ -83,6 +83,7 @@ export async function action({ request, params }: { request: Request; params: { 
     }
 
     if (request.method === "DELETE") {
+      // Archive the card instead of deleting
       // Remove card from all columns
       const allColumns = db.select().from(columns).where(eq(columns.boardId, board.id)).all();
       for (const column of allColumns) {
@@ -96,11 +97,11 @@ export async function action({ request, params }: { request: Request; params: { 
         }
       }
 
-      // Delete card tags
-      db.delete(cardTags).where(eq(cardTags.cardId, cardId)).run();
-
-      // Delete the card (comments will cascade)
-      db.delete(cards).where(eq(cards.id, cardId)).run();
+      // Set archivedAt timestamp instead of deleting
+      db.update(cards)
+        .set({ archivedAt: new Date(), updatedAt: new Date() })
+        .where(eq(cards.id, cardId))
+        .run();
 
       return new Response(JSON.stringify({ success: true }), {
         headers: { "Content-Type": "application/json" },

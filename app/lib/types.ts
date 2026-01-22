@@ -23,6 +23,7 @@ export interface KanbanCard {
   priority: 'low' | 'medium' | 'high';
   comments?: Comment[];
   tags?: Tag[];
+  archivedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
