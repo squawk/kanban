@@ -30,4 +30,5 @@ export default [
   route("api/columns/:columnId", "routes/api.columns.$columnId.ts"),
   route("api/tags", "routes/api.tags.ts"),
   route("api/templates", "routes/api.templates.ts"),
+  route("api/archived-cards", "routes/api.archived-cards.ts"),
 ] satisfies RouteConfig;
