@@ -317,6 +317,21 @@ export function KanbanBoard() {
       });
 
       if (response.ok) {
+        // Poof/smoke effect for archive
+        const colors = ['#94a3b8', '#cbd5e1', '#e2e8f0'];
+        confetti({
+          particleCount: 40,
+          spread: 100,
+          origin: { y: 0.6 },
+          colors: colors,
+          shapes: ['circle'],
+          gravity: 0.3,
+          scalar: 1.2,
+          drift: 0,
+          ticks: 80,
+          startVelocity: 15,
+        });
+
         // Remove from local state
         setBoard((prev) => {
           const newCards = { ...prev.cards };
