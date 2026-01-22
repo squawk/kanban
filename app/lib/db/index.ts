@@ -77,6 +77,7 @@ export function initializeDatabase() {
       due_date INTEGER,
       priority TEXT NOT NULL DEFAULT 'medium',
       board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+      archived_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -136,6 +137,13 @@ export function initializeDatabase() {
   }
   try {
     sqlite.exec(`ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists
+  }
+
+  // Add archived_at column to cards table if it doesn't exist
+  try {
+    sqlite.exec(`ALTER TABLE cards ADD COLUMN archived_at INTEGER`);
   } catch {
     // Column already exists
   }

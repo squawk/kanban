@@ -53,6 +53,7 @@ export const cards = sqliteTable("cards", {
   dueDate: integer("due_date", { mode: "timestamp" }),
   priority: text("priority").notNull().default("medium"),
   boardId: text("board_id").notNull().references(() => boards.id, { onDelete: "cascade" }),
+  archivedAt: integer("archived_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });

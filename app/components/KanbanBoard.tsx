@@ -15,7 +15,9 @@ import { KanbanCard } from "./KanbanCard";
 import { CardDialog } from "./CardDialog";
 import { ColumnDialog } from "./ColumnDialog";
 import { PromptDialog } from "./PromptDialog";
+import { ArchivedCardsDialog } from "./ArchivedCardsDialog";
 import { Button } from "./ui/button";
+import { Archive } from "lucide-react";
 import {
   KanbanCard as KanbanCardType,
   KanbanColumn as KanbanColumnType,
@@ -37,6 +39,9 @@ export function KanbanBoard() {
   const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [promptError, setPromptError] = useState<string | undefined>();
+
+  // Archive dialog state
+  const [isArchivedDialogOpen, setIsArchivedDialogOpen] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -448,26 +453,35 @@ export function KanbanBoard() {
               Organize your projects with style
             </p>
           </div>
-          <Button
-            onClick={() => setIsColumnDialogOpen(true)}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="mr-2"
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsArchivedDialogOpen(true)}
             >
-              <path d="M5 12h14" />
-              <path d="M12 5v14" />
-            </svg>
-            Add Column
-          </Button>
+              <Archive className="h-4 w-4 mr-2" />
+              Archive
+            </Button>
+            <Button
+              onClick={() => setIsColumnDialogOpen(true)}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="mr-2"
+              >
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
+              </svg>
+              Add Column
+            </Button>
+          </div>
         </div>
 
         <DndContext
@@ -531,6 +545,13 @@ export function KanbanBoard() {
         prompt={generatedPrompt}
         isLoading={isGenerating}
         error={promptError}
+      />
+
+      <ArchivedCardsDialog
+        open={isArchivedDialogOpen}
+        onOpenChange={setIsArchivedDialogOpen}
+        columns={board.columns}
+        onCardRestored={fetchBoard}
       />
     </div>
   );

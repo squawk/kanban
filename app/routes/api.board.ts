@@ -1,6 +1,6 @@
 import { db } from "~/lib/db";
 import { boards, columns, cards, comments, cardTags, tags } from "~/lib/db/schema";
-import { eq, asc, and } from "drizzle-orm";
+import { eq, asc, and, isNull } from "drizzle-orm";
 import { getSession, getUserBoard, createUserBoard } from "~/lib/auth";
 
 // GET /api/board - Get the kanban board with all columns and cards
@@ -39,11 +39,11 @@ export async function loader({ request }: { request: Request }) {
       .orderBy(asc(columns.position))
       .all();
 
-    // Get cards for this board
+    // Get cards for this board (exclude archived cards)
     const boardCards = db
       .select()
       .from(cards)
-      .where(eq(cards.boardId, board.id))
+      .where(and(eq(cards.boardId, board.id), isNull(cards.archivedAt)))
       .all();
 
     // Get comments for all cards
