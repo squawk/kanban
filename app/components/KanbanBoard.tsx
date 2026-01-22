@@ -42,6 +42,7 @@ export function KanbanBoard() {
 
   // Archive dialog state
   const [isArchivedDialogOpen, setIsArchivedDialogOpen] = useState(false);
+  const [archivedCount, setArchivedCount] = useState(0);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -54,7 +55,20 @@ export function KanbanBoard() {
   // Load board from database on mount
   useEffect(() => {
     fetchBoard();
+    fetchArchivedCount();
   }, []);
+
+  const fetchArchivedCount = async () => {
+    try {
+      const response = await apiFetch("/api/archived-cards");
+      if (response.ok) {
+        const data = await response.json();
+        setArchivedCount(data.length);
+      }
+    } catch (error) {
+      console.error("Error fetching archived count:", error);
+    }
+  };
 
   const fetchBoard = async () => {
     try {
@@ -317,6 +331,8 @@ export function KanbanBoard() {
             })),
           };
         });
+        // Update archived count
+        setArchivedCount((prev) => prev + 1);
       }
     } catch (error) {
       console.error("Error deleting card:", error);
@@ -460,6 +476,11 @@ export function KanbanBoard() {
             >
               <Archive className="h-4 w-4 mr-2" />
               Archive
+              {archivedCount > 0 && (
+                <span className="ml-2 bg-muted text-muted-foreground text-xs font-medium px-1.5 py-0.5 rounded-full">
+                  {archivedCount}
+                </span>
+              )}
             </Button>
             <Button
               onClick={() => setIsColumnDialogOpen(true)}
@@ -551,7 +572,10 @@ export function KanbanBoard() {
         open={isArchivedDialogOpen}
         onOpenChange={setIsArchivedDialogOpen}
         columns={board.columns}
-        onCardRestored={fetchBoard}
+        onCardRestored={() => {
+          fetchBoard();
+          fetchArchivedCount();
+        }}
       />
     </div>
   );
