@@ -1,6 +1,6 @@
 import { db } from "~/lib/db";
 import { boards, columns, cards, comments, cardTags, tags } from "~/lib/db/schema";
-import { eq, asc, and, isNull } from "drizzle-orm";
+import { eq, asc, and, isNull, inArray } from "drizzle-orm";
 import { getSession, getUserBoard, createUserBoard } from "~/lib/auth";
 
 // GET /api/board - Get the kanban board with all columns and cards
@@ -47,14 +47,16 @@ export async function loader({ request }: { request: Request }) {
       .all();
 
     // Get comments for all cards
+    // BOLT OPTIMIZATION: Use database-level filtering with inArray instead of fetching all and filtering in-memory
     const cardIds = boardCards.map((c) => c.id);
     const allComments = cardIds.length > 0
-      ? db.select().from(comments).all().filter((c) => cardIds.includes(c.cardId))
+      ? db.select().from(comments).where(inArray(comments.cardId, cardIds)).all()
       : [];
 
     // Get card tags
+    // BOLT OPTIMIZATION: Use database-level filtering with inArray instead of fetching all and filtering in-memory
     const allCardTags = cardIds.length > 0
-      ? db.select().from(cardTags).all().filter((ct) => cardIds.includes(ct.cardId))
+      ? db.select().from(cardTags).where(inArray(cardTags.cardId, cardIds)).all()
       : [];
 
     // Get all tags

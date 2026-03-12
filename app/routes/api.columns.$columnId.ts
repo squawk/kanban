@@ -49,15 +49,10 @@ export async function action({ request, params }: { request: Request; params: { 
     const cardIdsList = JSON.parse(column.cardIds) as string[];
 
     if (cardIdsList.length > 0) {
-      // Delete card tags
-      for (const cardId of cardIdsList) {
-        db.delete(cardTags).where(eq(cardTags.cardId, cardId)).run();
-        db.delete(comments).where(eq(comments.cardId, cardId)).run();
-      }
-      // Delete cards
-      for (const cardId of cardIdsList) {
-        db.delete(cards).where(eq(cards.id, cardId)).run();
-      }
+      // BOLT OPTIMIZATION: Use batch deletion with inArray to avoid N individual database calls
+      db.delete(cardTags).where(inArray(cardTags.cardId, cardIdsList)).run();
+      db.delete(comments).where(inArray(comments.cardId, cardIdsList)).run();
+      db.delete(cards).where(inArray(cards.id, cardIdsList)).run();
     }
 
     // Delete the column

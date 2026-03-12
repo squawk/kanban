@@ -1,6 +1,6 @@
 import { db } from "~/lib/db";
 import { cards, columns, cardTags, tags } from "~/lib/db/schema";
-import { eq, and, isNotNull, desc } from "drizzle-orm";
+import { eq, and, isNotNull, desc, inArray } from "drizzle-orm";
 import { getSession, getUserBoard } from "~/lib/auth";
 
 // GET /api/archived-cards - Get all archived cards for the user's board
@@ -35,9 +35,10 @@ export async function loader({ request }: { request: Request }) {
     const tagMap = new Map(allTags.map((t) => [t.id, t]));
 
     // Get card tags for archived cards
+    // BOLT OPTIMIZATION: Use database-level filtering with inArray instead of fetching all and filtering in-memory
     const cardIds = archivedCards.map((c) => c.id);
     const allCardTags = cardIds.length > 0
-      ? db.select().from(cardTags).all().filter((ct) => cardIds.includes(ct.cardId))
+      ? db.select().from(cardTags).where(inArray(cardTags.cardId, cardIds)).all()
       : [];
 
     // Transform cards with tags
