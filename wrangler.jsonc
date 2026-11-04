@@ -48,7 +48,7 @@
     // Live board updates (Supabase Realtime Broadcast). Both values are public: they're
     // sent to browsers. Also set the SUPABASE_SECRET_KEY secret. Leave empty to disable
     // (shared boards then fall back to polling every 30s).
-    "SUPABASE_URL": "",
-    "SUPABASE_PUBLISHABLE_KEY": ""
+    "SUPABASE_URL": "https://agayvtiuwszftidmxwif.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_35M-rh3OtFfPVuSeO41psw_abMvLeM5"
   }
 }
