@@ -3,6 +3,7 @@ import { db } from "~/lib/db";
 import { users } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { logAudit } from "~/lib/audit.server";
+import { isBootstrapAdminEmail } from "~/lib/config";
 import { checkRateLimit, rateLimitResponse, getClientIP, isValidEmail, INPUT_LIMITS } from "~/lib/security";
 
 export async function action({ request }: { request: Request }) {
@@ -12,7 +13,7 @@ export async function action({ request }: { request: Request }) {
 
   // Rate limiting to prevent brute force attacks
   const clientIP = getClientIP(request);
-  const rateLimit = checkRateLimit(clientIP, "auth");
+  const rateLimit = await checkRateLimit(clientIP, "auth");
   if (!rateLimit.allowed) {
     return rateLimitResponse(rateLimit.retryAfter!);
   }
@@ -44,7 +45,7 @@ export async function action({ request }: { request: Request }) {
     }
 
     // Find user
-    const user = findUserByEmail(email);
+    const user = await findUserByEmail(email);
     if (!user) {
       return new Response(
         JSON.stringify({ error: "Invalid email or password" }),
@@ -55,7 +56,7 @@ export async function action({ request }: { request: Request }) {
     // Verify password
     const isValid = await verifyPassword(password, user.passwordHash);
     if (!isValid) {
-      logAudit({
+      await logAudit({
         actor: { id: user.id, email: user.email },
         action: "auth.login_failed",
         entityType: "auth",
@@ -71,7 +72,7 @@ export async function action({ request }: { request: Request }) {
 
     // Disabled accounts cannot sign in (same message as bad credentials to avoid enumeration)
     if (user.disabled) {
-      logAudit({
+      await logAudit({
         actor: { id: user.id, email: user.email },
         action: "auth.login_blocked",
         entityType: "auth",
@@ -107,8 +108,14 @@ export async function action({ request }: { request: Request }) {
       );
     }
 
-    db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id)).run();
-    logAudit({
+    // Promote ADMIN_EMAIL addresses that signed up before being configured as admins
+    const promote = isBootstrapAdminEmail(user.email) && user.role !== "admin";
+    await db
+      .update(users)
+      .set({ lastLoginAt: new Date(), ...(promote && { role: "admin" as const }) })
+      .where(eq(users.id, user.id));
+    if (promote) user.role = "admin";
+    await logAudit({
       actor: { id: user.id, email: user.email },
       action: "auth.login",
       entityType: "auth",

@@ -24,7 +24,7 @@ export async function action({ request }: { request: Request }) {
 
   // Rate limiting to prevent registration spam
   const clientIP = getClientIP(request);
-  const rateLimit = checkRateLimit(clientIP, "auth");
+  const rateLimit = await checkRateLimit(clientIP, "auth");
   if (!rateLimit.allowed) {
     return rateLimitResponse(rateLimit.retryAfter!);
   }
@@ -70,9 +70,9 @@ export async function action({ request }: { request: Request }) {
     const isBootstrapAdmin = isBootstrapAdminEmail(email);
     const signupCheck = isBootstrapAdmin
       ? ({ allowed: true, autoApprove: true } as const)
-      : checkSignupAllowed(email, getSignupPolicy());
+      : checkSignupAllowed(email, await getSignupPolicy());
     if (!signupCheck.allowed) {
-      logAudit({
+      await logAudit({
         action: "auth.signup_blocked",
         entityType: "auth",
         summary: `Blocked sign-up for ${String(email).toLowerCase()} (${signupCheck.reason})`,
@@ -97,7 +97,7 @@ export async function action({ request }: { request: Request }) {
     }
 
     // Check if user already exists
-    const existingUser = findUserByEmail(email);
+    const existingUser = await findUserByEmail(email);
     if (existingUser) {
       // Use same delay as successful registration to prevent timing attacks
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -112,11 +112,11 @@ export async function action({ request }: { request: Request }) {
     const autoApprove = signupCheck.autoApprove;
 
     if (autoApprove) {
-      setUserApproved(user.id, true);
-      createUserBoard(user.id);
+      await setUserApproved(user.id, true);
+      await createUserBoard(user.id);
     }
 
-    logAudit({
+    await logAudit({
       actor: { id: user.id, email: user.email },
       action: "user.registered",
       entityType: "user",
@@ -127,12 +127,12 @@ export async function action({ request }: { request: Request }) {
     });
 
     // Create verification token and send email
-    const verificationToken = createEmailVerificationToken(user.id);
+    const verificationToken = await createEmailVerificationToken(user.id);
     await sendVerificationEmail(email, name, verificationToken);
 
     // Ask admins to approve the account
     if (!autoApprove) {
-      const adminEmails = getAdminRecipientEmails();
+      const adminEmails = await getAdminRecipientEmails();
       await sendAdminApprovalEmail(user.id, email, name, adminEmails.length ? adminEmails : undefined);
     }
 

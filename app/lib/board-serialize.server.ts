@@ -4,30 +4,29 @@ import { cardTags, comments, tags, users, type Card } from "./db/schema";
 
 type UserLite = { id: string; name: string; email: string };
 
-function loadUsers(ids: (string | null | undefined)[]): Map<string, UserLite> {
+async function loadUsers(ids: (string | null | undefined)[]): Promise<Map<string, UserLite>> {
   const unique = [...new Set(ids.filter((id): id is string => !!id))];
   if (unique.length === 0) return new Map();
-  const rows = db
+  const rows = await db
     .select({ id: users.id, name: users.name, email: users.email })
     .from(users)
-    .where(inArray(users.id, unique))
-    .all();
+    .where(inArray(users.id, unique));
   return new Map(rows.map((u) => [u.id, u]));
 }
 
 /** Serialize cards with tags, comments (with authors) and assignee for the client. */
-export function serializeCards(cardRows: Card[], opts: { includeComments?: boolean } = {}) {
+export async function serializeCards(cardRows: Card[], opts: { includeComments?: boolean } = {}) {
   const includeComments = opts.includeComments ?? true;
   const cardIds = cardRows.map((c) => c.id);
 
   const allComments =
-    includeComments && cardIds.length > 0 ? db.select().from(comments).where(inArray(comments.cardId, cardIds)).all() : [];
-  const allCardTags = cardIds.length > 0 ? db.select().from(cardTags).where(inArray(cardTags.cardId, cardIds)).all() : [];
+    includeComments && cardIds.length > 0 ? await db.select().from(comments).where(inArray(comments.cardId, cardIds)) : [];
+  const allCardTags = cardIds.length > 0 ? await db.select().from(cardTags).where(inArray(cardTags.cardId, cardIds)) : [];
   const tagIds = [...new Set(allCardTags.map((ct) => ct.tagId))];
   const tagMap = new Map(
-    (tagIds.length ? db.select().from(tags).where(inArray(tags.id, tagIds)).all() : []).map((t) => [t.id, t])
+    (tagIds.length ? await db.select().from(tags).where(inArray(tags.id, tagIds)) : []).map((t) => [t.id, t])
   );
-  const userMap = loadUsers([
+  const userMap = await loadUsers([
     ...cardRows.map((c) => c.assigneeId),
     ...cardRows.map((c) => c.createdById),
     ...allComments.map((c) => c.authorId),
@@ -88,9 +87,9 @@ export function serializeCards(cardRows: Card[], opts: { includeComments?: boole
 }
 
 /** Return only tag IDs that exist (prevents FK errors / junk rows). */
-export function filterValidTagIds(tagIds: unknown): string[] {
+export async function filterValidTagIds(tagIds: unknown): Promise<string[]> {
   if (!Array.isArray(tagIds)) return [];
   const ids = [...new Set(tagIds.filter((t): t is string => typeof t === "string"))];
   if (ids.length === 0) return [];
-  return db.select({ id: tags.id }).from(tags).where(inArray(tags.id, ids)).all().map((t) => t.id);
+  return ((await db.select({ id: tags.id }).from(tags).where(inArray(tags.id, ids)))).map((t) => t.id);
 }

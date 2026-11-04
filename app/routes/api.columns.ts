@@ -1,4 +1,4 @@
-import { db } from "~/lib/db";
+import { db, firstRow } from "~/lib/db";
 import { columns } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -13,18 +13,18 @@ export const action = api("create column", async ({ request }: { request: Reques
 
   const user = await requireUser(request);
   const { title, boardId } = await readJson<{ title?: string; boardId?: string }>(request);
-  const { board } = resolveBoard(user, boardId ?? boardIdFromRequest(request));
+  const { board } = await resolveBoard(user, boardId ?? boardIdFromRequest(request));
 
   if (!title || !title.trim()) return jsonError("Title is required", 400);
   if (title.length > INPUT_LIMITS.columnTitle) {
     return jsonError(`Title must be ${INPUT_LIMITS.columnTitle} characters or less`, 400);
   }
 
-  const existingColumns = db.select().from(columns).where(eq(columns.boardId, board.id)).all();
+  const existingColumns = await db.select().from(columns).where(eq(columns.boardId, board.id));
   const columnId = nanoid();
   const now = new Date();
 
-  db.insert(columns)
+  await db.insert(columns)
     .values({
       id: columnId,
       title: title.trim(),
@@ -33,12 +33,11 @@ export const action = api("create column", async ({ request }: { request: Reques
       cardIds: "[]",
       createdAt: now,
       updatedAt: now,
-    })
-    .run();
+    });
 
-  const newColumn = db.select().from(columns).where(eq(columns.id, columnId)).get();
+  const newColumn = await db.select().from(columns).where(eq(columns.id, columnId)).limit(1).then(firstRow);
 
-  logAudit({
+  await logAudit({
     actor: user,
     action: "column.created",
     entityType: "column",

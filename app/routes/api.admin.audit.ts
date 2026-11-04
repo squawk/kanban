@@ -14,7 +14,7 @@ export const loader = api("load audit log", async ({ request }: { request: Reque
   const p = new URL(request.url).searchParams;
   const format = p.get("format");
 
-  const result = queryAuditLogs({
+  const result = await queryAuditLogs({
     action: p.get("action") || undefined,
     actorId: p.get("actorId") || undefined,
     entityType: p.get("entityType") || undefined,

@@ -1,4 +1,4 @@
-import { db } from "~/lib/db";
+import { db, firstRow } from "~/lib/db";
 import { cards, columns, cardTags, users } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -31,19 +31,19 @@ export const action = api("create card", async ({ request }: { request: Request 
   if (notes && notes.length > INPUT_LIMITS.cardNotes) return jsonError(`Notes must be ${INPUT_LIMITS.cardNotes} characters or less`, 400);
 
   // The column determines the board; access is checked against it
-  const { column } = requireColumnAccess(user, columnId);
+  const { column } = await requireColumnAccess(user, columnId);
   const boardId = column.boardId;
 
-  if (assigneeId && !isBoardParticipant(boardId, assigneeId)) {
+  if (assigneeId && !await isBoardParticipant(boardId, assigneeId)) {
     return jsonError("Assignee must be a member of this board", 400);
   }
 
   const cardId = nanoid();
   const now = new Date();
-  const validTagIds = filterValidTagIds(tagIds);
+  const validTagIds = await filterValidTagIds(tagIds);
 
-  db.transaction((tx) => {
-    tx.insert(cards)
+  await db.transaction(async (tx) => {
+    await tx.insert(cards)
       .values({
         id: cardId,
         title,
@@ -55,22 +55,21 @@ export const action = api("create card", async ({ request }: { request: Request 
         createdById: user.id,
         createdAt: now,
         updatedAt: now,
-      })
-      .run();
+      });
 
-    const fresh = tx.select().from(columns).where(eq(columns.id, columnId)).get()!;
+    const fresh = (await tx.select().from(columns).where(eq(columns.id, columnId)).for("update").limit(1).then(firstRow))!;
     const cardIdsList = JSON.parse(fresh.cardIds);
     cardIdsList.push(cardId);
-    tx.update(columns).set({ cardIds: JSON.stringify(cardIdsList), updatedAt: now }).where(eq(columns.id, columnId)).run();
+    await tx.update(columns).set({ cardIds: JSON.stringify(cardIdsList), updatedAt: now }).where(eq(columns.id, columnId));
 
     for (const tagId of validTagIds) {
-      tx.insert(cardTags).values({ cardId, tagId, createdAt: now }).run();
+      await tx.insert(cardTags).values({ cardId, tagId, createdAt: now });
     }
   });
 
-  const newCard = db.select().from(cards).where(eq(cards.id, cardId)).get()!;
+  const newCard = (await db.select().from(cards).where(eq(cards.id, cardId)).limit(1).then(firstRow))!;
 
-  logAudit({
+  await logAudit({
     actor: user,
     action: "card.created",
     entityType: "card",
@@ -82,8 +81,8 @@ export const action = api("create card", async ({ request }: { request: Request 
   });
 
   if (assigneeId) {
-    const assigneeName = db.select({ name: users.name }).from(users).where(eq(users.id, assigneeId)).get()?.name;
-    logAudit({
+    const assigneeName = (await db.select({ name: users.name }).from(users).where(eq(users.id, assigneeId)).limit(1).then(firstRow))?.name;
+    await logAudit({
       actor: user,
       action: "card.assigned",
       entityType: "card",
@@ -96,5 +95,5 @@ export const action = api("create card", async ({ request }: { request: Request 
     notifyCardAssigned(newCard, assigneeId, user);
   }
 
-  return json(serializeCards([newCard])[0], 201);
+  return json((await serializeCards([newCard]))[0], 201);
 });

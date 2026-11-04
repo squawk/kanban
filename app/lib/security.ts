@@ -1,3 +1,5 @@
+import { getRequestContext } from "./db";
+
 /**
  * Security utilities for the Kanban application
  * Implements defense-in-depth security controls
@@ -17,14 +19,45 @@ const RATE_LIMITS: Record<string, RateLimitConfig> = {
   openai: { windowMs: 60 * 1000, maxRequests: 10 },  // 10 AI generations per minute
 };
 
+interface RateLimitBinding {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
+/** Cloudflare Rate Limiting bindings (see wrangler.jsonc), by limit type. */
+const RATE_LIMIT_BINDINGS: Record<keyof typeof RATE_LIMITS, string> = {
+  auth: "AUTH_RATE_LIMITER",
+  api: "API_RATE_LIMITER",
+  openai: "OPENAI_RATE_LIMITER",
+};
+
 /**
- * Check rate limit for a given key and limit type
- * Returns true if request is allowed, false if rate limited
+ * Check rate limit for a given key and limit type.
+ * On Cloudflare this uses the Rate Limiting binding (shared across instances);
+ * elsewhere (tests, local Node) it falls back to an in-memory window.
  */
-export function checkRateLimit(key: string, limitType: keyof typeof RATE_LIMITS): { allowed: boolean; retryAfter?: number } {
+export async function checkRateLimit(
+  key: string,
+  limitType: keyof typeof RATE_LIMITS
+): Promise<{ allowed: boolean; retryAfter?: number }> {
+  const binding = getRequestContext()?.env[RATE_LIMIT_BINDINGS[limitType]] as RateLimitBinding | undefined;
+  if (binding) {
+    try {
+      const { success } = await binding.limit({ key: `${limitType}:${key}` });
+      return success ? { allowed: true } : { allowed: false, retryAfter: 60 };
+    } catch (error) {
+      console.error("Rate limiter error:", error instanceof Error ? error.message : error);
+      return { allowed: true }; // fail open rather than locking everyone out
+    }
+  }
+
   const config = RATE_LIMITS[limitType];
   const now = Date.now();
   const storeKey = `${limitType}:${key}`;
+
+  // Opportunistic cleanup (no timers: Workers forbid them at module scope)
+  if (rateLimitStore.size > 10_000) {
+    for (const [k, entry] of rateLimitStore) if (now > entry.resetTime) rateLimitStore.delete(k);
+  }
 
   const entry = rateLimitStore.get(storeKey);
 
@@ -63,6 +96,10 @@ export function rateLimitResponse(retryAfter: number): Response {
  * Get client IP from request (handles proxies)
  */
 export function getClientIP(request: Request): string {
+  // Set by Cloudflare and can't be spoofed by the client
+  const cfIP = request.headers.get("cf-connecting-ip");
+  if (cfIP) return cfIP;
+
   // Check common proxy headers
   const forwardedFor = request.headers.get("x-forwarded-for");
   if (forwardedFor) {
@@ -185,13 +222,3 @@ export function validatePassword(password: string): { valid: boolean; error?: st
   }
   return { valid: true };
 }
-
-// Cleanup old rate limit entries periodically (every 5 minutes)
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitStore.entries()) {
-    if (now > entry.resetTime) {
-      rateLimitStore.delete(key);
-    }
-  }
-}, 5 * 60 * 1000);

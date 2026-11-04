@@ -1,18 +1,12 @@
-import sgMail from "@sendgrid/mail";
 import { generateApprovalToken } from "~/routes/api.auth.approve";
 import { getAdminEmails, getAppUrl } from "~/lib/config";
 
-// Initialize SendGrid with API key
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@example.com";
-const APP_URL = getAppUrl();
-
-if (SENDGRID_API_KEY) {
-  sgMail.setApiKey(SENDGRID_API_KEY);
-}
+// Read lazily: on Workers, env vars are only guaranteed inside a request/cron context
+const getSendGridKey = () => process.env.SENDGRID_API_KEY || "";
+const getFromEmail = () => process.env.FROM_EMAIL || "noreply@example.com";
 
 export function isEmailConfigured(): boolean {
-  return !!SENDGRID_API_KEY;
+  return !!getSendGridKey();
 }
 
 // Escape HTML to prevent XSS in emails
@@ -33,12 +27,14 @@ export interface EmailMessage {
 }
 
 /**
- * Send an email via SendGrid. When SendGrid isn't configured, the message is
- * logged in development (so links such as invitations can still be tested) and
- * skipped in production. Never throws.
+ * Send an email through SendGrid's v3 REST API (plain fetch, so it runs on
+ * Cloudflare Workers). When SendGrid isn't configured, the message is logged in
+ * development (so links such as invitations can still be tested) and skipped in
+ * production. Never throws.
  */
 export async function sendEmail(msg: EmailMessage): Promise<boolean> {
-  if (!isEmailConfigured()) {
+  const apiKey = getSendGridKey();
+  if (!apiKey) {
     if (process.env.NODE_ENV !== "production") {
       console.info(`[email:dev] To: ${[msg.to].flat().join(", ")}\nSubject: ${msg.subject}\n${msg.text}\n`);
     } else {
@@ -47,7 +43,24 @@ export async function sendEmail(msg: EmailMessage): Promise<boolean> {
     return false;
   }
   try {
-    await sgMail.send({ ...msg, from: FROM_EMAIL });
+    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        // One personalization per recipient so recipients don't see each other
+        personalizations: [msg.to].flat().map((email) => ({ to: [{ email }] })),
+        from: { email: getFromEmail() },
+        subject: msg.subject,
+        content: [
+          { type: "text/plain", value: msg.text },
+          { type: "text/html", value: msg.html },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      console.error(`SendGrid rejected "${msg.subject}": ${res.status} ${(await res.text()).slice(0, 300)}`);
+      return false;
+    }
     return true;
   } catch (error) {
     console.error(`Error sending email "${msg.subject}":`, error instanceof Error ? error.message : error);
@@ -92,7 +105,7 @@ export async function sendInvitationEmail(opts: {
   token: string;
   expiresAt: Date;
 }): Promise<boolean> {
-  const url = `${APP_URL}/accept-invite?token=${opts.token}`;
+  const url = `${getAppUrl()}/accept-invite?token=${opts.token}`;
   const expires = opts.expiresAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   return sendEmail({
     to: opts.email,
@@ -114,7 +127,7 @@ export async function sendVerificationEmail(
   token: string
 ): Promise<boolean> {
   const safeName = escapeHtml(name);
-  const verificationUrl = `${APP_URL}/verify-email?token=${token}`;
+  const verificationUrl = `${getAppUrl()}/verify-email?token=${token}`;
 
   const msg = {
     to: email,
@@ -146,7 +159,7 @@ export async function sendPasswordResetEmail(
   token: string
 ): Promise<boolean> {
   const safeName = escapeHtml(name);
-  const resetUrl = `${APP_URL}/reset-password?token=${token}`;
+  const resetUrl = `${getAppUrl()}/reset-password?token=${token}`;
 
   const msg = {
     to: email,
@@ -187,8 +200,8 @@ export async function sendAdminApprovalEmail(
 
   const recipients = adminRecipients && adminRecipients.length > 0 ? adminRecipients : getAdminEmails();
 
-  const approveUrl = `${APP_URL}/api/auth/approve?userId=${userId}&action=approve&token=${approveToken}`;
-  const rejectUrl = `${APP_URL}/api/auth/approve?userId=${userId}&action=reject&token=${rejectToken}`;
+  const approveUrl = `${getAppUrl()}/api/auth/approve?userId=${userId}&action=approve&token=${approveToken}`;
+  const rejectUrl = `${getAppUrl()}/api/auth/approve?userId=${userId}&action=reject&token=${rejectToken}`;
 
   const msg = {
     to: recipients,
@@ -212,7 +225,7 @@ export async function sendAdminApprovalEmail(
             Reject
           </a>
         </p>
-        <p style="color: #666; font-size: 14px;">You can also manage pending users from the Admin page: ${APP_URL}/admin</p>
+        <p style="color: #666; font-size: 14px;">You can also manage pending users from the Admin page: ${getAppUrl()}/admin</p>
       </div>
     `,
   };
@@ -226,7 +239,7 @@ export async function sendApprovalNotificationEmail(
   approved: boolean
 ): Promise<boolean> {
   const safeName = escapeHtml(name);
-  const loginUrl = `${APP_URL}/login`;
+  const loginUrl = `${getAppUrl()}/login`;
 
   const msg = {
     to: email,

@@ -1,4 +1,4 @@
-import { db } from "~/lib/db";
+import { db, firstRow } from "~/lib/db";
 import { comments, users } from "~/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -24,15 +24,14 @@ export const loader = api(
   "fetch comments",
   async ({ request, params }: { request: Request; params: { cardId: string } }) => {
     const user = await requireUser(request);
-    requireCardAccess(user, params.cardId);
+    await requireCardAccess(user, params.cardId);
 
-    const rows = db
+    const rows = await db
       .select({ comment: comments, author: { id: users.id, name: users.name, email: users.email } })
       .from(comments)
       .leftJoin(users, eq(users.id, comments.authorId))
       .where(eq(comments.cardId, params.cardId))
-      .orderBy(asc(comments.createdAt))
-      .all();
+      .orderBy(asc(comments.createdAt));
 
     return json(rows.map((r) => serializeComment(r.comment, r.author?.id ? r.author : null)));
   }
@@ -45,7 +44,7 @@ export const action = api(
     if (request.method !== "POST") return jsonError("Method not allowed", 405);
 
     const user = await requireUser(request);
-    const { card } = requireCardAccess(user, params.cardId);
+    const { card } = await requireCardAccess(user, params.cardId);
     const { content } = await readJson<{ content?: string }>(request);
 
     if (!content || typeof content !== "string" || !content.trim()) {
@@ -59,13 +58,12 @@ export const action = api(
     const now = new Date();
     const trimmed = content.trim();
 
-    db.insert(comments)
-      .values({ id: commentId, content: trimmed, cardId: card.id, authorId: user.id, createdAt: now, updatedAt: now })
-      .run();
+    await db.insert(comments)
+      .values({ id: commentId, content: trimmed, cardId: card.id, authorId: user.id, createdAt: now, updatedAt: now });
 
-    const newComment = db.select().from(comments).where(eq(comments.id, commentId)).get()!;
+    const newComment = (await db.select().from(comments).where(eq(comments.id, commentId)).limit(1).then(firstRow))!;
 
-    logAudit({
+    await logAudit({
       actor: user,
       action: "comment.created",
       entityType: "card",

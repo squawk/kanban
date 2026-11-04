@@ -1,4 +1,4 @@
-import { db } from "~/lib/db";
+import { db, firstRow } from "~/lib/db";
 import { tags } from "~/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { getSession, isActiveUser } from "~/lib/auth";
@@ -8,14 +8,14 @@ import { nanoid } from "nanoid";
 export async function loader({ request }: { request: Request }) {
   try {
     const session = await getSession(request);
-    if (!session.userId || !isActiveUser(session.userId)) {
+    if (!session.userId || !await isActiveUser(session.userId)) {
       return new Response(
         JSON.stringify({ error: "Unauthorized" }),
         { status: 401, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    const allTags = db.select().from(tags).orderBy(asc(tags.name)).all();
+    const allTags = await db.select().from(tags).orderBy(asc(tags.name));
 
     return new Response(JSON.stringify(allTags), {
       headers: { "Content-Type": "application/json" },
@@ -37,7 +37,7 @@ export async function action({ request }: { request: Request }) {
 
   try {
     const session = await getSession(request);
-    if (!session.userId || !isActiveUser(session.userId)) {
+    if (!session.userId || !await isActiveUser(session.userId)) {
       return new Response(
         JSON.stringify({ error: "Unauthorized" }),
         { status: 401, headers: { "Content-Type": "application/json" } }
@@ -54,7 +54,7 @@ export async function action({ request }: { request: Request }) {
     }
 
     // Check if tag with this name already exists
-    const existing = db.select().from(tags).where(eq(tags.name, name)).get();
+    const existing = await db.select().from(tags).where(eq(tags.name, name)).limit(1).then(firstRow);
 
     if (existing) {
       return new Response(
@@ -66,15 +66,15 @@ export async function action({ request }: { request: Request }) {
     const tagId = nanoid();
     const now = new Date();
 
-    db.insert(tags).values({
+    await db.insert(tags).values({
       id: tagId,
       name,
       color,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
-    const newTag = db.select().from(tags).where(eq(tags.id, tagId)).get();
+    const newTag = await db.select().from(tags).where(eq(tags.id, tagId)).limit(1).then(firstRow);
 
     return new Response(JSON.stringify(newTag), {
       status: 201,

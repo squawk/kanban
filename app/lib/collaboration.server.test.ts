@@ -7,17 +7,12 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 
 vi.hoisted(() => {
-  // Must run before the DB module is imported
-  const os = require("os") as typeof import("os");
-  const path = require("path") as typeof import("path");
-  const fs = require("fs") as typeof import("fs");
-  process.env.DATABASE_PATH = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kanban-test-")), "test.db");
   process.env.SESSION_SECRET = "test_secret_that_is_at_least_32_characters_long";
   process.env.ADMIN_EMAIL = "admin@acme.com";
   process.env.REMINDER_TIMEZONE = "UTC";
   process.env.REMINDER_HOUR = "8";
   process.env.CRON_SECRET = "cron-secret-for-tests";
-  delete process.env.SENDGRID_API_KEY;
+  process.env.SENDGRID_API_KEY = ""; // email "not configured"
 });
 
 const sent = vi.hoisted(() => [] as { to: string | string[]; subject: string }[]);
@@ -36,6 +31,11 @@ vi.mock("~/lib/email", async (importOriginal) => {
   };
 });
 
+import { PGlite } from "@electric-sql/pglite";
+import { drizzle } from "drizzle-orm/pglite";
+import { migrate } from "drizzle-orm/pglite/migrator";
+import * as schema from "~/lib/db/schema";
+import { setFallbackDb, type Database } from "~/lib/db";
 import * as auth from "~/lib/auth";
 import * as notifications from "~/lib/notifications.server";
 import * as login_ from "~/routes/api.auth.login";
@@ -87,9 +87,9 @@ async function body(res: Response) {
 
 async function createActiveUser(email: string, name: string) {
   const user = await m.auth.createUser(email, "Password1", name);
-  m.auth.setEmailVerified(user.id, true);
-  m.auth.setUserApproved(user.id, true);
-  m.auth.createUserBoard(user.id);
+  await m.auth.setEmailVerified(user.id, true);
+  await m.auth.setUserApproved(user.id, true);
+  await m.auth.createUserBoard(user.id);
   return user as { id: string; email: string; name: string };
 }
 
@@ -106,6 +106,12 @@ let bob: { id: string; email: string };
 let adminCookie: string, aliceCookie: string, bobCookie: string;
 
 beforeAll(async () => {
+  // Real Postgres (WASM, in-process) with the same migrations used in production
+  const pg = new PGlite();
+  const testDb = drizzle(pg, { schema });
+  await migrate(testDb, { migrationsFolder: "./drizzle" });
+  setFallbackDb(testDb as unknown as Database);
+
   admin = await createActiveUser("admin@acme.com", "Ada Admin");
   alice = await createActiveUser("alice@acme.com", "Alice");
   bob = await createActiveUser("bob@acme.com", "Bob");
@@ -185,7 +191,7 @@ describe("sign-up policy", () => {
     const ok = await register("insider@eng.acme.com");
     expect(ok.status).toBe(201);
     expect((await body(ok)).requiresApproval).toBe(false);
-    const user = m.auth.findUserByEmail("insider@eng.acme.com");
+    const user = await m.auth.findUserByEmail("insider@eng.acme.com");
     expect(user.approved).toBe(true);
     // no admin approval email when auto-approved
     expect(sent.some((s) => s.subject.includes("pending approval"))).toBe(false);

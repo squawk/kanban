@@ -1,6 +1,8 @@
 # kanban
 
-A modern kanban board application built with React Router 7, Tailwind CSS, and shadcn/ui.
+A modern kanban board application built with React Router 7, Tailwind CSS, and shadcn/ui,
+running on Cloudflare Workers (https://kanban.skyhawklabs.dev) with Supabase Postgres.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for setup, deployment, and local development.
 
 ## Features
 
@@ -18,44 +20,29 @@ A modern kanban board application built with React Router 7, Tailwind CSS, and s
 - **User management**: approve or reject pending sign-ups, disable accounts (signs them out immediately), or delete them.
 - **Shared boards & assignment**: board owners share their board with other users from the **Share** button. Anyone on a board can assign cards to board members, filter by "Assigned to me" or "Unassigned", and see everything assigned to them across boards in **My Tasks**.
 - **Audit trail**: sign-ins, admin actions, sharing, and every card change (field-level diffs, moves, assignments, comments) are recorded. Admins can search, filter, and export the log as CSV; board members see a card's history under **Show activity**.
-- **Due-date reminders**: a daily digest email to each person with cards due tomorrow or today and cards that have just become overdue (assignee first, otherwise the card's creator). Cards in a Completed/Done column are skipped, each reminder is sent once (changing the due date re-arms it), and the same opt-out applies. The app checks hourly while running; `.github/workflows/due-reminders.yml` also wakes it daily via `POST /api/cron/due-reminders`.
+- **Due-date reminders**: a daily digest email to each person with cards due tomorrow or today and cards that have just become overdue (assignee first, otherwise the card's creator). Cards in a Completed/Done column are skipped, each reminder is sent once (changing the due date re-arms it), and the same opt-out applies. A Cloudflare Cron Trigger checks hourly (nothing is sent before `REMINDER_HOUR` in `REMINDER_TIMEZONE`); `POST /api/cron/due-reminders` with `CRON_SECRET` triggers a run on demand.
 - **Email notifications** (SendGrid): when you're assigned a card, when someone comments on or moves a card you created or are assigned to, and when a board is shared with you. Users can turn these off from the account menu (click your avatar).
 
-See `.env.example` for the related environment variables.
+Configuration lives in `wrangler.jsonc` (vars) and Worker secrets; see `.dev.vars.example`.
 
 ## Getting Started
 
-### Prerequisites
-
-- Node.js 18+ 
-- npm or yarn
-
-### Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/squawk/kanban.git
-cd kanban
-```
-
-2. Install dependencies:
 ```bash
 npm install
+cp .dev.vars.example .dev.vars
 ```
 
-3. Start the development server:
-```bash
-npm run dev
-```
-
-The application will be available at `http://localhost:5173`
+You need a Postgres database for local development. See [DEPLOYMENT.md](DEPLOYMENT.md#local-development).
 
 ## Available Scripts
 
-- `npm run dev` - Start the development server
-- `npm run build` - Build for production
-- `npm run start` - Start the production server
-- `npm run typecheck` - Run TypeScript type checking
+- `npm run dev`: start the dev server (runs in the Workers runtime)
+- `npm run build` / `npm run preview`: build, and preview the production build locally
+- `npm run deploy`: build and deploy to Cloudflare
+- `npm run typecheck`: generate types and run TypeScript
+- `npm test`: run tests (server tests use in-process Postgres via PGlite)
+- `npm run db:generate` / `npm run db:migrate`: create and apply Drizzle migrations
+- `npm run db:import-sqlite -- <file>`: one-time import from the old SQLite database
 
 ## Project Structure
 
@@ -80,6 +67,8 @@ kanban/
 - [shadcn/ui](https://ui.shadcn.com) - UI Components
 - [TypeScript](https://www.typescriptlang.org) - Type Safety
 - [Vite](https://vitejs.dev) - Build Tool
+- [Cloudflare Workers](https://developers.cloudflare.com/workers/) + [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) - Hosting
+- [Supabase Postgres](https://supabase.com) + [Drizzle ORM](https://orm.drizzle.team) - Database
 
 ## License
 

@@ -10,7 +10,7 @@ import { logAudit } from "~/lib/audit.server";
 // GET /api/admin/invitations
 export const loader = api("list invitations", async ({ request }: { request: Request }) => {
   await requireAdmin(request);
-  return json(listInvitations());
+  return json(await listInvitations());
 });
 
 // POST   { email, role } - invite (or re-send to) someone
@@ -23,9 +23,9 @@ export const action = api("update invitations", async ({ request }: { request: R
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     const role = body.role === "admin" ? "admin" : "member";
     if (!isValidEmail(email)) return jsonError("Enter a valid email address", 400);
-    if (findUserByEmail(email)) return jsonError("A user with that email already exists", 409);
+    if (await findUserByEmail(email)) return jsonError("A user with that email already exists", 409);
 
-    const invite = createInvitation(email, role, admin.id);
+    const invite = await createInvitation(email, role, admin.id);
     const sent = await sendInvitationEmail({
       email,
       inviterName: admin.name,
@@ -33,7 +33,7 @@ export const action = api("update invitations", async ({ request }: { request: R
       expiresAt: invite.expiresAt,
     });
 
-    logAudit({
+    await logAudit({
       actor: admin,
       action: "invitation.created",
       entityType: "invitation",
@@ -60,9 +60,9 @@ export const action = api("update invitations", async ({ request }: { request: R
 
   if (request.method === "DELETE") {
     if (!body.id) return jsonError("id is required", 400);
-    const invite = revokeInvitation(body.id);
+    const invite = await revokeInvitation(body.id);
     if (!invite) return jsonError("Invitation not found or no longer pending", 404);
-    logAudit({
+    await logAudit({
       actor: admin,
       action: "invitation.revoked",
       entityType: "invitation",

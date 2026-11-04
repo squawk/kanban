@@ -14,7 +14,7 @@ export async function action({ request }: { request: Request }) {
 
     const session = await getSessionWithResponse(request, response);
     if (session.userId) {
-      logAudit({
+      await logAudit({
         actor: { id: session.userId, email: session.email ?? "" },
         action: "auth.logout",
         entityType: "auth",

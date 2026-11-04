@@ -3,7 +3,7 @@ import { json } from "~/lib/http";
 
 // GET /api/auth/signup-config - public: tells the login page whether sign-up is open
 export async function loader() {
-  const policy = getSignupPolicy();
+  const policy = await getSignupPolicy();
   return json({
     mode: policy.mode,
     // Only reveal allowed domains when domain-restricted (helps users pick the right email)

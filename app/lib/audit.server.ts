@@ -24,9 +24,9 @@ export interface AuditEvent {
  * Append an entry to the audit trail. Never throws: auditing must not break the
  * user-facing operation, but failures are logged.
  */
-export function logAudit(event: AuditEvent): void {
+export async function logAudit(event: AuditEvent): Promise<void> {
   try {
-    db.insert(auditLogs)
+    await db.insert(auditLogs)
       .values({
         id: nanoid(),
         actorId: event.actor?.id ?? null,
@@ -39,8 +39,7 @@ export function logAudit(event: AuditEvent): void {
         metadata: JSON.stringify(event.metadata ?? {}),
         ipAddress: event.request ? getClientIP(event.request) : null,
         createdAt: new Date(),
-      })
-      .run();
+      });
   } catch (error) {
     console.error("Failed to write audit log:", error instanceof Error ? error.message : error);
   }
@@ -52,7 +51,8 @@ function escapeLike(value: string): string {
 }
 
 function likeEscaped(column: AnyColumn, pattern: string): SQL {
-  return sql`${column} LIKE ${pattern} ESCAPE '\\'`;
+  // ILIKE: case-insensitive, matching how the old SQLite LIKE behaved
+  return sql`${column} ILIKE ${pattern} ESCAPE '\\'`;
 }
 
 export interface AuditQuery {
@@ -91,7 +91,7 @@ export function serializeAuditLog(row: typeof auditLogs.$inferSelect) {
 
 export type SerializedAuditLog = ReturnType<typeof serializeAuditLog>;
 
-export function queryAuditLogs(q: AuditQuery) {
+export async function queryAuditLogs(q: AuditQuery) {
   const limit = Math.min(Math.max(q.limit ?? 50, 1), 200);
   const conditions: SQL[] = [];
   if (q.action) {
@@ -111,14 +111,13 @@ export function queryAuditLogs(q: AuditQuery) {
     conditions.push(or(likeEscaped(auditLogs.summary, term), likeEscaped(auditLogs.actorEmail, term))!);
   }
 
-  const rows = db
+  const rows = await db
     .select()
     .from(auditLogs)
     .where(conditions.length ? and(...conditions) : undefined)
-    // rowid breaks ties between events logged in the same millisecond
-    .orderBy(desc(auditLogs.createdAt), desc(sql`rowid`))
-    .limit(limit + 1)
-    .all();
+    // seq breaks ties between events logged in the same millisecond
+    .orderBy(desc(auditLogs.createdAt), desc(auditLogs.seq))
+    .limit(limit + 1);
 
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit).map(serializeAuditLog);

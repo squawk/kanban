@@ -2,9 +2,9 @@
  * Sends due-date reminder emails: one digest per person listing cards due
  * tomorrow/today and cards that just became overdue.
  *
- * Runs hourly inside the server process and via POST /api/cron/due-reminders (for
- * hosts that stop idle machines). The due_reminders table makes it idempotent, so
- * overlapping runs or several instances never send the same reminder twice.
+ * Runs hourly from the Worker's Cron Trigger (see workers/app.ts and wrangler.jsonc)
+ * and on demand via POST /api/cron/due-reminders. The due_reminders table makes it
+ * idempotent, so overlapping runs never send the same reminder twice.
  */
 import { and, eq, gte, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import { db } from "./db";
@@ -32,11 +32,11 @@ export interface ReminderRunResult {
   remindersSent: number;
 }
 
-function loadCandidates(today: string): ReminderCandidate[] {
+async function loadCandidates(today: string): Promise<ReminderCandidate[]> {
   const from = new Date(`${addDays(today, -OVERDUE_LOOKBACK_DAYS)}T00:00:00Z`);
   const to = new Date(`${addDays(today, 1)}T00:00:00Z`);
 
-  const rows = db
+  const rows = await db
     .select({
       id: cards.id,
       title: cards.title,
@@ -50,15 +50,13 @@ function loadCandidates(today: string): ReminderCandidate[] {
     })
     .from(cards)
     .innerJoin(boards, eq(boards.id, cards.boardId))
-    .where(and(isNull(cards.archivedAt), isNotNull(cards.dueDate), gte(cards.dueDate, from), lte(cards.dueDate, to)))
-    .all();
+    .where(and(isNull(cards.archivedAt), isNotNull(cards.dueDate), gte(cards.dueDate, from), lte(cards.dueDate, to)));
   if (rows.length === 0) return [];
 
-  const columnRows = db
+  const columnRows = await db
     .select({ title: columns.title, cardIds: columns.cardIds })
     .from(columns)
-    .where(inArray(columns.boardId, [...new Set(rows.map((r) => r.boardId))]))
-    .all();
+    .where(inArray(columns.boardId, [...new Set(rows.map((r) => r.boardId))]));
   const columnOf = new Map<string, string>();
   for (const col of columnRows) for (const id of JSON.parse(col.cardIds) as string[]) columnOf.set(id, col.title);
 
@@ -158,27 +156,23 @@ export async function runDueReminders(now = new Date(), opts: { ignoreHour?: boo
   running = true;
 
   try {
-    const candidates = loadCandidates(today);
+    const candidates = await loadCandidates(today);
     if (candidates.length === 0) return { ...base, ran: true };
 
-    const sent = db
+    const sent = await db
       .select({ cardId: dueReminders.cardId, kind: dueReminders.kind, dueDay: dueReminders.dueDay })
       .from(dueReminders)
-      .where(inArray(dueReminders.cardId, candidates.map((c) => c.cardId)))
-      .all();
+      .where(inArray(dueReminders.cardId, candidates.map((c) => c.cardId)));
     const alreadySent = new Set(sent.map((s) => `${s.cardId}:${s.kind}:${s.dueDay}`));
 
     const byRecipient = groupByRecipient(planReminders(candidates, today, alreadySent));
     if (byRecipient.size === 0) return { ...base, ran: true };
 
-    const recipients = new Map(
-      db
-        .select({ id: users.id, name: users.name, email: users.email, emailNotifications: users.emailNotifications, disabled: users.disabled })
-        .from(users)
-        .where(inArray(users.id, [...byRecipient.keys()]))
-        .all()
-        .map((u) => [u.id, u])
-    );
+    const recipientRows = await db
+      .select({ id: users.id, name: users.name, email: users.email, emailNotifications: users.emailNotifications, disabled: users.disabled })
+      .from(users)
+      .where(inArray(users.id, [...byRecipient.keys()]));
+    const recipients = new Map(recipientRows.map((u) => [u.id, u]));
 
     let emailsSent = 0;
     let remindersSent = 0;
@@ -187,26 +181,24 @@ export async function runDueReminders(now = new Date(), opts: { ignoreHour?: boo
       if (!user || user.disabled || !user.emailNotifications) continue;
 
       // Claim first so concurrent runs (or another instance) can't double-send
-      const claimed = db.transaction((tx) =>
-        items.filter(
-          (r) =>
-            tx
-              .insert(dueReminders)
-              .values({ cardId: r.cardId, kind: r.kind, dueDay: r.dueDay, userId, sentAt: new Date() })
-              .onConflictDoNothing()
-              .run().changes > 0
-        )
-      );
+      const claimed: PlannedReminder[] = [];
+      for (const r of items) {
+        const inserted = await db
+          .insert(dueReminders)
+          .values({ cardId: r.cardId, kind: r.kind, dueDay: r.dueDay, userId, sentAt: new Date() })
+          .onConflictDoNothing()
+          .returning({ cardId: dueReminders.cardId });
+        if (inserted.length > 0) claimed.push(r);
+      }
       if (claimed.length === 0) continue;
 
       const ok = await sendEmail({ to: user.email, ...buildReminderEmail(user.name, claimed, today) });
       if (!ok && isEmailConfigured()) {
         // Delivery failed: release the claims so the next run retries
-        db.transaction((tx) => {
+        await db.transaction(async (tx) => {
           for (const r of claimed) {
-            tx.delete(dueReminders)
-              .where(and(eq(dueReminders.cardId, r.cardId), eq(dueReminders.kind, r.kind), eq(dueReminders.dueDay, r.dueDay)))
-              .run();
+            await tx.delete(dueReminders)
+              .where(and(eq(dueReminders.cardId, r.cardId), eq(dueReminders.kind, r.kind), eq(dueReminders.dueDay, r.dueDay)));
           }
         });
         continue;
@@ -216,7 +208,7 @@ export async function runDueReminders(now = new Date(), opts: { ignoreHour?: boo
     }
 
     if (remindersSent > 0) {
-      logAudit({
+      await logAudit({
         action: "notification.due_reminders_sent",
         entityType: "system",
         summary: `Sent ${remindersSent} due-date reminder(s) in ${emailsSent} email(s)`,
@@ -227,20 +219,4 @@ export async function runDueReminders(now = new Date(), opts: { ignoreHour?: boo
   } finally {
     running = false;
   }
-}
-
-/** Start the hourly in-process scheduler once per process. */
-export function startDueReminderScheduler() {
-  const g = globalThis as unknown as { __dueReminderTimer?: ReturnType<typeof setInterval> };
-  if (g.__dueReminderTimer || process.env.VITEST || !getReminderConfig().enabled) return;
-
-  const tick = () => {
-    runDueReminders().catch((error) =>
-      console.error("Due reminder run failed:", error instanceof Error ? error.message : error)
-    );
-  };
-  // First run shortly after boot (covers machines woken by traffic), then hourly
-  setTimeout(tick, 30_000).unref?.();
-  g.__dueReminderTimer = setInterval(tick, 60 * 60 * 1000);
-  g.__dueReminderTimer.unref?.();
 }

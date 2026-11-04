@@ -1,4 +1,4 @@
-import { db } from "~/lib/db";
+import { db, firstRow } from "~/lib/db";
 import { cards, columns, cardTags, users } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { api, isBoardParticipant, requireCardAccess, requireUser } from "~/lib/access.server";
@@ -11,9 +11,9 @@ import { notifyCardAssigned } from "~/lib/notifications.server";
 
 const PRIORITIES = ["low", "medium", "high"];
 
-function userName(id: string | null): string {
+async function userName(id: string | null): Promise<string> {
   if (!id) return "nobody";
-  return db.select({ name: users.name }).from(users).where(eq(users.id, id)).get()?.name ?? "unknown user";
+  return (await db.select({ name: users.name }).from(users).where(eq(users.id, id)).limit(1).then(firstRow))?.name ?? "unknown user";
 }
 
 // PUT /api/cards/:cardId - Update a card
@@ -25,7 +25,7 @@ export const action = api(
     if (!cardId) return jsonError("Card ID is required", 400);
 
     const user = await requireUser(request);
-    const { card } = requireCardAccess(user, cardId);
+    const { card } = await requireCardAccess(user, cardId);
 
     if (request.method === "PUT") {
       const body = await readJson<{
@@ -46,16 +46,16 @@ export const action = api(
         return jsonError(`Notes must be ${INPUT_LIMITS.cardNotes} characters or less`, 400);
       }
       if (priority !== undefined && !PRIORITIES.includes(priority)) return jsonError("Invalid priority", 400);
-      if (assigneeId && !isBoardParticipant(card.boardId, assigneeId)) {
+      if (assigneeId && !await isBoardParticipant(card.boardId, assigneeId)) {
         return jsonError("Assignee must be a member of this board", 400);
       }
 
-      const beforeTagIds = db.select().from(cardTags).where(eq(cardTags.cardId, cardId)).all().map((t) => t.tagId);
-      const nextTagIds = tagIds !== undefined ? filterValidTagIds(tagIds) : beforeTagIds;
+      const beforeTagIds = (await db.select().from(cardTags).where(eq(cardTags.cardId, cardId))).map((t) => t.tagId);
+      const nextTagIds = tagIds !== undefined ? await filterValidTagIds(tagIds) : beforeTagIds;
       const now = new Date();
 
-      db.transaction((tx) => {
-        tx.update(cards)
+      await db.transaction(async (tx) => {
+        await tx.update(cards)
           .set({
             ...(title !== undefined && { title }),
             ...(notes !== undefined && { notes }),
@@ -65,18 +65,17 @@ export const action = api(
             ...(assigneeId !== undefined && { assigneeId: assigneeId || null }),
             updatedAt: now,
           })
-          .where(eq(cards.id, cardId))
-          .run();
+          .where(eq(cards.id, cardId));
 
         if (tagIds !== undefined) {
-          tx.delete(cardTags).where(eq(cardTags.cardId, cardId)).run();
+          await tx.delete(cardTags).where(eq(cardTags.cardId, cardId));
           for (const tagId of nextTagIds) {
-            tx.insert(cardTags).values({ cardId, tagId, createdAt: now }).run();
+            await tx.insert(cardTags).values({ cardId, tagId, createdAt: now });
           }
         }
       });
 
-      const updatedCard = db.select().from(cards).where(eq(cards.id, cardId)).get()!;
+      const updatedCard = (await db.select().from(cards).where(eq(cards.id, cardId)).limit(1).then(firstRow))!;
 
       // Audit the field-level changes
       const changes = diffCard(
@@ -85,7 +84,7 @@ export const action = api(
       );
       const nonAssignChanges = changes.filter((c) => c.field !== "assigneeId");
       if (nonAssignChanges.length) {
-        logAudit({
+        await logAudit({
           actor: user,
           action: "card.updated",
           entityType: "card",
@@ -100,42 +99,41 @@ export const action = api(
       const prevAssignee = card.assigneeId ?? null;
       const nextAssignee = updatedCard.assigneeId ?? null;
       if (prevAssignee !== nextAssignee) {
-        logAudit({
+        await logAudit({
           actor: user,
           action: nextAssignee ? "card.assigned" : "card.unassigned",
           entityType: "card",
           entityId: cardId,
           boardId: card.boardId,
           summary: nextAssignee
-            ? `Assigned "${updatedCard.title}" to ${userName(nextAssignee)}`
-            : `Unassigned "${updatedCard.title}" (was ${userName(prevAssignee)})`,
+            ? `Assigned "${updatedCard.title}" to ${await userName(nextAssignee)}`
+            : `Unassigned "${updatedCard.title}" (was ${await userName(prevAssignee)})`,
           metadata: { from: prevAssignee, to: nextAssignee },
           request,
         });
         if (nextAssignee) notifyCardAssigned(updatedCard, nextAssignee, user);
       }
 
-      return json(serializeCards([updatedCard])[0]);
+      return json((await serializeCards([updatedCard]))[0]);
     }
 
     if (request.method === "DELETE") {
       // Archive the card instead of deleting: remove from all columns of its board
       const now = new Date();
-      db.transaction((tx) => {
-        const allColumns = tx.select().from(columns).where(eq(columns.boardId, card.boardId)).all();
+      await db.transaction(async (tx) => {
+        const allColumns = await tx.select().from(columns).where(eq(columns.boardId, card.boardId)).for("update");
         for (const column of allColumns) {
           const cardIdsList = JSON.parse(column.cardIds) as string[];
           if (cardIdsList.includes(cardId)) {
-            tx.update(columns)
+            await tx.update(columns)
               .set({ cardIds: JSON.stringify(cardIdsList.filter((id) => id !== cardId)), updatedAt: now })
-              .where(eq(columns.id, column.id))
-              .run();
+              .where(eq(columns.id, column.id));
           }
         }
-        tx.update(cards).set({ archivedAt: now, updatedAt: now }).where(eq(cards.id, cardId)).run();
+        await tx.update(cards).set({ archivedAt: now, updatedAt: now }).where(eq(cards.id, cardId));
       });
 
-      logAudit({
+      await logAudit({
         actor: user,
         action: "card.archived",
         entityType: "card",

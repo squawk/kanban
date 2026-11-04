@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { db, firstRow } from "./db";
 import { appSettings } from "./db/schema";
 import { eq } from "drizzle-orm";
 import { getSignupDefaults, SIGNUP_MODES, type SignupMode } from "./config";
@@ -6,9 +6,9 @@ import { normalizeDomains, type SignupPolicy } from "./signup-policy";
 
 const KEY_SIGNUP = "signup_policy";
 
-export function getSignupPolicy(): SignupPolicy {
+export async function getSignupPolicy(): Promise<SignupPolicy> {
   const defaults = getSignupDefaults();
-  const row = db.select().from(appSettings).where(eq(appSettings.key, KEY_SIGNUP)).get();
+  const row = await db.select().from(appSettings).where(eq(appSettings.key, KEY_SIGNUP)).limit(1).then(firstRow);
   if (!row) return defaults;
   try {
     const parsed = JSON.parse(row.value) as Partial<SignupPolicy>;
@@ -46,11 +46,10 @@ export function validateSignupPolicyInput(
   };
 }
 
-export function saveSignupPolicy(policy: SignupPolicy) {
+export async function saveSignupPolicy(policy: SignupPolicy) {
   const now = new Date();
   const value = JSON.stringify(policy);
-  db.insert(appSettings)
+  await db.insert(appSettings)
     .values({ key: KEY_SIGNUP, value, updatedAt: now })
-    .onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt: now } })
-    .run();
+    .onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt: now } });
 }

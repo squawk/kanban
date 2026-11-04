@@ -7,7 +7,7 @@ import { logAudit } from "~/lib/audit.server";
 // GET /api/admin/settings
 export const loader = api("load settings", async ({ request }: { request: Request }) => {
   await requireAdmin(request);
-  return json({ signup: getSignupPolicy(), emailConfigured: isEmailConfigured() });
+  return json({ signup: await getSignupPolicy(), emailConfigured: isEmailConfigured() });
 });
 
 // PUT /api/admin/settings { signup: { mode, allowedDomains, requireApproval } }
@@ -19,10 +19,10 @@ export const action = api("save settings", async ({ request }: { request: Reques
   const result = validateSignupPolicyInput(body.signup);
   if (!result.ok) return jsonError(result.error, 400);
 
-  const before = getSignupPolicy();
-  saveSignupPolicy(result.policy);
+  const before = await getSignupPolicy();
+  await saveSignupPolicy(result.policy);
 
-  logAudit({
+  await logAudit({
     actor: admin,
     action: "settings.signup_updated",
     entityType: "settings",

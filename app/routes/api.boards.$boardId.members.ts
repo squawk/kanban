@@ -1,4 +1,4 @@
-import { db } from "~/lib/db";
+import { db, firstRow } from "~/lib/db";
 import { boardMembers, boards, cards, users } from "~/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { api, getBoardParticipants, requireBoardAccess, requireUser } from "~/lib/access.server";
@@ -11,8 +11,8 @@ type Args = { request: Request; params: { boardId: string } };
 // GET /api/boards/:boardId/members - People who can see (and be assigned on) this board
 export const loader = api("list board members", async ({ request, params }: Args) => {
   const user = await requireUser(request);
-  requireBoardAccess(user, params.boardId);
-  return json(getBoardParticipants(params.boardId));
+  await requireBoardAccess(user, params.boardId);
+  return json(await getBoardParticipants(params.boardId));
 });
 
 // POST   { userId } - add a member (owner only)
@@ -20,16 +20,16 @@ export const loader = api("list board members", async ({ request, params }: Args
 export const action = api("update board members", async ({ request, params }: Args) => {
   const user = await requireUser(request);
   const { boardId } = params;
-  const role = requireBoardAccess(user, boardId);
+  const role = await requireBoardAccess(user, boardId);
   const { userId } = await readJson<{ userId?: string }>(request);
   if (!userId) return jsonError("userId is required", 400);
 
-  const board = db.select().from(boards).where(eq(boards.id, boardId)).get()!;
-  const target = db
+  const board = (await db.select().from(boards).where(eq(boards.id, boardId)).limit(1).then(firstRow))!;
+  const target = await db
     .select({ id: users.id, name: users.name, email: users.email, approved: users.approved, disabled: users.disabled })
     .from(users)
     .where(eq(users.id, userId))
-    .get();
+    .limit(1).then(firstRow);
   if (!target) return jsonError("User not found", 404);
 
   if (request.method === "POST") {
@@ -37,14 +37,14 @@ export const action = api("update board members", async ({ request, params }: Ar
     if (target.id === board.userId) return jsonError("The owner already has access", 400);
     if (!target.approved || target.disabled) return jsonError("That user can't be added right now", 400);
 
-    const inserted = db
+    const inserted = await db
       .insert(boardMembers)
       .values({ boardId, userId, addedById: user.id, createdAt: new Date() })
       .onConflictDoNothing()
-      .run();
+      .returning({ userId: boardMembers.userId });
 
-    if (inserted.changes > 0) {
-      logAudit({
+    if (inserted.length > 0) {
+      await logAudit({
         actor: user,
         action: "board.member_added",
         entityType: "board",
@@ -56,7 +56,7 @@ export const action = api("update board members", async ({ request, params }: Ar
       });
       notifyAddedToBoard(boardId, userId, user);
     }
-    return json(getBoardParticipants(boardId), inserted.changes > 0 ? 201 : 200);
+    return json(await getBoardParticipants(boardId), inserted.length > 0 ? 201 : 200);
   }
 
   if (request.method === "DELETE") {
@@ -64,16 +64,15 @@ export const action = api("update board members", async ({ request, params }: Ar
     if (role !== "owner" && !isSelf) return jsonError("Only the board owner can remove members", 403);
     if (userId === board.userId) return jsonError("The board owner can't be removed", 400);
 
-    db.transaction((tx) => {
-      tx.delete(boardMembers).where(and(eq(boardMembers.boardId, boardId), eq(boardMembers.userId, userId))).run();
+    await db.transaction(async (tx) => {
+      await tx.delete(boardMembers).where(and(eq(boardMembers.boardId, boardId), eq(boardMembers.userId, userId)));
       // Cards assigned to someone who lost access become unassigned
-      tx.update(cards)
+      await tx.update(cards)
         .set({ assigneeId: null, updatedAt: new Date() })
-        .where(and(eq(cards.boardId, boardId), eq(cards.assigneeId, userId)))
-        .run();
+        .where(and(eq(cards.boardId, boardId), eq(cards.assigneeId, userId)));
     });
 
-    logAudit({
+    await logAudit({
       actor: user,
       action: isSelf ? "board.member_left" : "board.member_removed",
       entityType: "board",
@@ -85,7 +84,7 @@ export const action = api("update board members", async ({ request, params }: Ar
       metadata: { userId },
       request,
     });
-    return json(getBoardParticipants(boardId));
+    return json(await getBoardParticipants(boardId));
   }
 
   return jsonError("Method not allowed", 405);

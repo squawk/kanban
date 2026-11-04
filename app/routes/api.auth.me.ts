@@ -15,7 +15,7 @@ export async function loader({ request }: { request: Request }) {
       return json({ user: null });
     }
 
-    const user = findUserById(session.userId);
+    const user = await findUserById(session.userId);
     if (!user || user.disabled || !user.approved) {
       return json({ user: null });
     }
@@ -45,12 +45,11 @@ export const action = api("update preferences", async ({ request }: { request: R
     return jsonError("emailNotifications must be a boolean", 400);
   }
 
-  db.update(users)
+  await db.update(users)
     .set({ emailNotifications: body.emailNotifications, updatedAt: new Date() })
-    .where(eq(users.id, user.id))
-    .run();
+    .where(eq(users.id, user.id));
 
-  logAudit({
+  await logAudit({
     actor: user,
     action: "user.preferences_updated",
     entityType: "user",

@@ -1,236 +1,81 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+/**
+ * Database access.
+ *
+ * On Cloudflare Workers each request gets its own postgres.js client connected
+ * through Hyperdrive (which does the real pooling). The client lives in an
+ * AsyncLocalStorage request context so library code can keep importing `db`.
+ *
+ * Outside a request (tests, scripts) a fallback database is used: one set with
+ * `setFallbackDb` (tests use in-process PGlite) or `DATABASE_URL`.
+ */
+import { AsyncLocalStorage } from "node:async_hooks";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import * as schema from "./schema";
-import path from "path";
-import fs from "fs";
 
-// Use DATABASE_PATH env var if set (for production with persistent volume)
-// Otherwise use local data.db for development
-const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), "data.db");
+export type Database = PostgresJsDatabase<typeof schema>;
 
-// Ensure the directory exists for the database file
-const dbDir = path.dirname(dbPath);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+export interface RequestContext {
+  db: Database;
+  /** Cloudflare bindings (rate limiters etc.); empty outside Workers */
+  env: Record<string, unknown>;
+  /** Keep the Worker alive for background work (emails) after the response is sent */
+  waitUntil: (promise: Promise<unknown>) => void;
 }
 
-const sqlite = new Database(dbPath);
-sqlite.pragma("foreign_keys = ON");
+const storage = new AsyncLocalStorage<RequestContext>();
 
-// Enable WAL mode for better performance
-sqlite.pragma("journal_mode = WAL");
-
-export const db = drizzle(sqlite, { schema });
-
-// Initialize database tables
-export function initializeDatabase() {
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      name TEXT NOT NULL,
-      email_verified INTEGER NOT NULL DEFAULT 0,
-      approved INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS email_verification_tokens (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token TEXT NOT NULL UNIQUE,
-      expires_at INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS password_reset_tokens (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token TEXT NOT NULL UNIQUE,
-      expires_at INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS boards (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL DEFAULT 'My Board',
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS columns (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      position INTEGER NOT NULL,
-      board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
-      card_ids TEXT NOT NULL DEFAULT '[]',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS cards (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      notes TEXT NOT NULL DEFAULT '',
-      generated_prompt TEXT,
-      due_date INTEGER,
-      priority TEXT NOT NULL DEFAULT 'medium',
-      board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
-      archived_at INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS comments (
-      id TEXT PRIMARY KEY,
-      content TEXT NOT NULL,
-      card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS tags (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      color TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS card_tags (
-      card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
-      tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (card_id, tag_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS templates (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      title TEXT NOT NULL,
-      notes TEXT NOT NULL DEFAULT '',
-      tags TEXT NOT NULL DEFAULT '[]',
-      priority TEXT NOT NULL DEFAULT 'medium',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS board_members (
-      board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      added_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (board_id, user_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS invitations (
-      id TEXT PRIMARY KEY,
-      email TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'member',
-      token_hash TEXT NOT NULL UNIQUE,
-      invited_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-      expires_at INTEGER NOT NULL,
-      accepted_at INTEGER,
-      revoked_at INTEGER,
-      created_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS audit_logs (
-      id TEXT PRIMARY KEY,
-      actor_id TEXT,
-      actor_email TEXT,
-      action TEXT NOT NULL,
-      entity_type TEXT NOT NULL,
-      entity_id TEXT,
-      board_id TEXT,
-      summary TEXT NOT NULL DEFAULT '',
-      metadata TEXT NOT NULL DEFAULT '{}',
-      ip_address TEXT,
-      created_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS app_settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS due_reminders (
-      card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
-      kind TEXT NOT NULL,
-      due_day TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      sent_at INTEGER NOT NULL,
-      PRIMARY KEY (card_id, kind, due_day)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_board_members_user_id ON board_members(user_id);
-    CREATE INDEX IF NOT EXISTS idx_invitations_email ON invitations(email);
-    CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
-    CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
-    CREATE INDEX IF NOT EXISTS idx_audit_logs_board_id ON audit_logs(board_id);
-    CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_id ON audit_logs(actor_id);
-    CREATE INDEX IF NOT EXISTS idx_boards_user_id ON boards(user_id);
-    CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
-    CREATE INDEX IF NOT EXISTS idx_cards_board_id ON cards(board_id);
-    CREATE INDEX IF NOT EXISTS idx_cards_due_date ON cards(due_date);
-    CREATE INDEX IF NOT EXISTS idx_comments_card_id ON comments(card_id);
-    CREATE INDEX IF NOT EXISTS idx_card_tags_card_id ON card_tags(card_id);
-    CREATE INDEX IF NOT EXISTS idx_card_tags_tag_id ON card_tags(tag_id);
-    CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_id ON email_verification_tokens(user_id);
-    CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_token ON email_verification_tokens(token);
-    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);
-    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token);
-  `);
-
-  // Add new columns to existing users table if they don't exist
-  try {
-    sqlite.exec(`ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
-  } catch {
-    // Column already exists
-  }
-  try {
-    sqlite.exec(`ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 0`);
-  } catch {
-    // Column already exists
-  }
-
-  // Add archived_at column to cards table if it doesn't exist
-  try {
-    sqlite.exec(`ALTER TABLE cards ADD COLUMN archived_at INTEGER`);
-  } catch {
-    // Column already exists
-  }
-
-  // Multi-user: roles, assignment, authorship
-  const addColumn = (sql: string) => {
-    try {
-      sqlite.exec(sql);
-    } catch {
-      // Column already exists
-    }
-  };
-  addColumn(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'`);
-  addColumn(`ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0`);
-  addColumn(`ALTER TABLE users ADD COLUMN email_notifications INTEGER NOT NULL DEFAULT 1`);
-  addColumn(`ALTER TABLE users ADD COLUMN last_login_at INTEGER`);
-  addColumn(`ALTER TABLE cards ADD COLUMN assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL`);
-  addColumn(`ALTER TABLE cards ADD COLUMN created_by_id TEXT REFERENCES users(id) ON DELETE SET NULL`);
-  addColumn(`ALTER TABLE comments ADD COLUMN author_id TEXT REFERENCES users(id) ON DELETE SET NULL`);
-  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cards_assignee_id ON cards(assignee_id)`);
-
-  // Bootstrap: promote the configured admin email(s) to admin
-  const adminEmails = (process.env.ADMIN_EMAIL || "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  if (adminEmails.length > 0) {
-    const stmt = sqlite.prepare(`UPDATE users SET role = 'admin' WHERE lower(email) = ? AND role != 'admin'`);
-    for (const email of adminEmails) stmt.run(email);
-  }
+export function createDb(connectionString: string) {
+  const client = postgres(connectionString, {
+    max: 5,
+    // Hyperdrive caches and pools; avoid an extra round trip on connect
+    fetch_types: false,
+  });
+  return { db: drizzle(client, { schema }), close: () => client.end({ timeout: 5 }) };
 }
 
-// Initialize on module load
-initializeDatabase();
+export function runWithContext<T>(ctx: RequestContext, fn: () => T): T {
+  return storage.run(ctx, fn);
+}
+
+export function getRequestContext(): RequestContext | undefined {
+  return storage.getStore();
+}
+
+let fallback: Database | null = null;
+
+/** Use a specific database outside of request contexts (tests, scripts). */
+export function setFallbackDb(database: Database | null) {
+  fallback = database;
+}
+
+export function getDb(): Database {
+  const ctx = storage.getStore();
+  if (ctx) return ctx.db;
+  if (fallback) return fallback;
+  if (process.env.DATABASE_URL) {
+    fallback = createDb(process.env.DATABASE_URL).db;
+    return fallback;
+  }
+  throw new Error("No database available: run inside a request context or set DATABASE_URL");
+}
+
+/** Schedule background work that must finish even after the response is sent. */
+export function waitUntil(promise: Promise<unknown>) {
+  const ctx = storage.getStore();
+  if (ctx) ctx.waitUntil(promise);
+}
+
+/** The current request's database. Resolved lazily on every property access. */
+export const db: Database = new Proxy({} as Database, {
+  get(_target, prop) {
+    const current = getDb() as unknown as Record<string | symbol, unknown>;
+    const value = current[prop];
+    return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(current) : value;
+  },
+});
+
+/** `.then(firstRow)` turns a select into "first row or undefined". */
+export function firstRow<T>(rows: T[]): T | undefined {
+  return rows[0];
+}

@@ -7,11 +7,11 @@ import { logAudit } from "~/lib/audit.server";
 // GET /api/auth/accept-invite?token=... - check an invitation before showing the form
 export async function loader({ request }: { request: Request }) {
   const clientIP = getClientIP(request);
-  const rateLimit = checkRateLimit(clientIP, "api");
+  const rateLimit = await checkRateLimit(clientIP, "api");
   if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter!);
 
   const token = new URL(request.url).searchParams.get("token") ?? "";
-  const invite = findPendingInvitation(token);
+  const invite = await findPendingInvitation(token);
   if (!invite) return jsonError("This invitation is invalid or has expired.", 404);
   return json({ email: invite.email, role: invite.role, expiresAt: invite.expiresAt.toISOString() });
 }
@@ -21,7 +21,7 @@ export async function action({ request }: { request: Request }) {
   if (request.method !== "POST") return jsonError("Method not allowed", 405);
 
   const clientIP = getClientIP(request);
-  const rateLimit = checkRateLimit(clientIP, "auth");
+  const rateLimit = await checkRateLimit(clientIP, "auth");
   if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter!);
 
   try {
@@ -38,7 +38,7 @@ export async function action({ request }: { request: Request }) {
     const result = await acceptInvitation(token, trimmedName, password);
     if (!result.ok) return jsonError(result.error, 400);
 
-    logAudit({
+    await logAudit({
       actor: { id: result.user.id, email: result.user.email },
       action: "invitation.accepted",
       entityType: "invitation",

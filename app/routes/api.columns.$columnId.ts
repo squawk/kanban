@@ -13,25 +13,25 @@ export const action = api(
     if (!params.columnId) return jsonError("Column ID is required", 400);
 
     const user = await requireUser(request);
-    const { column, role } = requireColumnAccess(user, params.columnId);
+    const { column, role } = await requireColumnAccess(user, params.columnId);
     if (role !== "owner") return jsonError("Only the board owner can delete columns", 403);
 
     const cardIdsList = JSON.parse(column.cardIds) as string[];
     const deletedTitles = cardIdsList.length
-      ? db.select({ title: cards.title }).from(cards).where(inArray(cards.id, cardIdsList)).all().map((c) => c.title)
+      ? (await db.select({ title: cards.title }).from(cards).where(inArray(cards.id, cardIdsList))).map((c) => c.title)
       : [];
 
-    db.transaction((tx) => {
+    await db.transaction(async (tx) => {
       if (cardIdsList.length > 0) {
         // BOLT OPTIMIZATION: Use batch deletion with inArray to avoid N individual database calls
-        tx.delete(cardTags).where(inArray(cardTags.cardId, cardIdsList)).run();
-        tx.delete(comments).where(inArray(comments.cardId, cardIdsList)).run();
-        tx.delete(cards).where(inArray(cards.id, cardIdsList)).run();
+        await tx.delete(cardTags).where(inArray(cardTags.cardId, cardIdsList));
+        await tx.delete(comments).where(inArray(comments.cardId, cardIdsList));
+        await tx.delete(cards).where(inArray(cards.id, cardIdsList));
       }
-      tx.delete(columns).where(eq(columns.id, column.id)).run();
+      await tx.delete(columns).where(eq(columns.id, column.id));
     });
 
-    logAudit({
+    await logAudit({
       actor: user,
       action: "column.deleted",
       entityType: "column",

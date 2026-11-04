@@ -7,8 +7,8 @@ export const loader = api(
   "fetch card activity",
   async ({ request, params }: { request: Request; params: { cardId: string } }) => {
     const user = await requireUser(request);
-    const { card } = requireCardAccess(user, params.cardId);
-    const { entries } = queryAuditLogs({ entityType: "card", entityId: card.id, limit: 100 });
+    const { card } = await requireCardAccess(user, params.cardId);
+    const { entries } = await queryAuditLogs({ entityType: "card", entityId: card.id, limit: 100 });
     // Don't expose IP addresses to non-admins
     return json(entries.map(({ ipAddress: _ip, ...rest }) => rest));
   }
