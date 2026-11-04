@@ -1,8 +1,8 @@
 /**
  * Browser side of live boards over Supabase Realtime:
  *  - Broadcast: calls `onChange` when someone else edits the board (we then refetch).
- *  - Presence: reports who is viewing the board right now, and which card each person
- *    has open for editing.
+ *  - Presence: reports who is viewing the board right now. (Who is *editing* a card
+ *    comes from server-side card locks, which are authoritative.)
  * The realtime client is loaded lazily so it only downloads when needed.
  */
 export interface RealtimeInfo {
@@ -17,28 +17,19 @@ export type RealtimeStatus = "connecting" | "live" | "offline";
 
 export interface BoardViewer {
   userId: string;
-  /** Card this person has open in the edit dialog, if any */
-  editingCardId: string | null;
 }
 
 interface PresenceMeta {
   user_id?: unknown;
-  editing_card_id?: unknown;
 }
 
 /** Collapse Realtime's presence state (one entry per tab) into one viewer per user. */
 export function viewersFromPresence(state: Record<string, PresenceMeta[]>): BoardViewer[] {
-  const byUser = new Map<string, BoardViewer>();
+  const ids = new Set<string>();
   for (const metas of Object.values(state)) {
-    for (const meta of metas) {
-      if (typeof meta.user_id !== "string") continue;
-      const editing = typeof meta.editing_card_id === "string" ? meta.editing_card_id : null;
-      const existing = byUser.get(meta.user_id);
-      if (!existing) byUser.set(meta.user_id, { userId: meta.user_id, editingCardId: editing });
-      else if (!existing.editingCardId && editing) existing.editingCardId = editing;
-    }
+    for (const meta of metas) if (typeof meta.user_id === "string") ids.add(meta.user_id);
   }
-  return [...byUser.values()];
+  return [...ids].map((userId) => ({ userId }));
 }
 
 /**
@@ -66,8 +57,6 @@ function createTokenProvider(boardId: string) {
 
 export interface BoardSubscription {
   unsubscribe: () => void;
-  /** Tell other viewers which card you're editing (null when the dialog closes). */
-  setEditing: (cardId: string | null) => void;
 }
 
 export function subscribeToBoard(opts: {
@@ -82,8 +71,6 @@ export function subscribeToBoard(opts: {
   let cleanup: (() => void) | null = null;
   let cancelled = false;
   let wasLive = false;
-  let editingCardId: string | null = null;
-  let track: (() => void) | null = null;
 
   onStatus("connecting");
   import("@supabase/realtime-js")
@@ -106,9 +93,6 @@ export function subscribeToBoard(opts: {
           presence: { key: userId, enabled: true },
         },
       });
-      track = () => {
-        channel.track({ user_id: userId, editing_card_id: editingCardId }).catch(() => {});
-      };
       channel
         .on("broadcast", { event: "changed" }, () => onChange())
         .on("presence", { event: "sync" }, () =>
@@ -120,7 +104,7 @@ export function subscribeToBoard(opts: {
             if (wasLive) onChange();
             wasLive = true;
             onStatus("live");
-            track?.();
+            channel.track({ user_id: userId }).catch(() => {});
           } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
             onStatus("offline");
             onPresence([]);
@@ -141,11 +125,6 @@ export function subscribeToBoard(opts: {
     unsubscribe: () => {
       cancelled = true;
       cleanup?.();
-    },
-    setEditing: (cardId) => {
-      if (cardId === editingCardId) return;
-      editingCardId = cardId;
-      track?.();
     },
   };
 }

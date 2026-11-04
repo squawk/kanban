@@ -12,6 +12,8 @@ import { Button } from "./ui/button";
 import type { ActivityEntry, BoardMember, Comment, Tag, KanbanCard, KanbanColumn } from "~/lib/types";
 import { MessageSquare, Send, Calendar, Tag as TagIcon, AlertCircle, Plus, Columns, User as UserIcon, History } from "lucide-react";
 import { UserAvatar } from "./UserAvatar";
+import type { CardLockState } from "~/lib/use-card-lock";
+import { Lock } from "lucide-react";
 
 interface CardDialogProps {
   open: boolean;
@@ -23,7 +25,7 @@ interface CardDialogProps {
     priority: 'low' | 'medium' | 'high';
     tagIds: string[];
     assigneeId?: string | null;
-  }) => void;
+  }) => void | boolean | Promise<void | boolean>;
   initialCard?: KanbanCard;
   cardId?: string;
   columns?: KanbanColumn[];
@@ -32,8 +34,11 @@ interface CardDialogProps {
   /** People who can be assigned (board owner + members). Enables the assignee picker. */
   members?: BoardMember[];
   currentUserId?: string;
-  /** Other people with this card open right now (Realtime presence) */
-  otherEditors?: BoardMember[];
+  /** Edit-lock state for an existing card (the dialog is read-only unless we hold it) */
+  lockState?: CardLockState;
+  onTakeOver?: () => void;
+  /** Error from the last save attempt (e.g. the card was locked) */
+  saveError?: string;
 }
 
 export function CardDialog({
@@ -47,8 +52,16 @@ export function CardDialog({
   onColumnChange,
   members,
   currentUserId,
-  otherEditors,
+  lockState,
+  onTakeOver,
+  saveError,
 }: CardDialogProps) {
+  // Existing cards are editable only while we hold the edit lock. If the lock
+  // service is unreachable ("error") we allow editing; the server still enforces on save.
+  const readOnly =
+    !!cardId &&
+    !!lockState &&
+    (lockState.status === "locked" || lockState.status === "lost" || lockState.status === "acquiring");
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState<string>("");
@@ -178,9 +191,12 @@ export function CardDialog({
     }
   };
 
-  const handleSave = () => {
+  const [saving, setSaving] = useState(false);
+  const handleSave = async () => {
+    if (readOnly || saving) return;
     if (title.trim()) {
-      onSave({
+      setSaving(true);
+      const result = await onSave({
         title: title.trim(),
         notes: notes.trim(),
         dueDate: dueDate || undefined,
@@ -188,7 +204,9 @@ export function CardDialog({
         tagIds: selectedTagIds,
         ...(members ? { assigneeId: assigneeId || null } : {}),
       });
-      handleClose();
+      setSaving(false);
+      // A failed save (e.g. someone else holds the lock) keeps the dialog and your edits
+      if (result !== false) handleClose();
     }
   };
 
@@ -283,23 +301,41 @@ export function CardDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
-          {cardId && otherEditors && otherEditors.length > 0 && (
+          {cardId && (lockState?.status === "locked" || lockState?.status === "lost") && (
             <div
-              className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300"
+              className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300"
               role="status"
-              data-testid="concurrent-editing-warning"
+              data-testid="card-lock-banner"
             >
-              <span className="flex -space-x-1">
-                {otherEditors.slice(0, 3).map((e) => (
-                  <UserAvatar key={e.id} user={e} size="xs" />
-                ))}
+              <Lock className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="flex-1">
+                {lockState.status === "locked" ? (
+                  <>
+                    <strong>{lockState.holder.name}</strong> is editing this card, so it's read-only for you. It
+                    unlocks automatically when they're done; you can still comment.
+                  </>
+                ) : (
+                  <>
+                    {lockState.holder ? <strong>{lockState.holder.name}</strong> : "Someone else"} took over editing
+                    this card. Your unsaved changes weren't saved.
+                  </>
+                )}
               </span>
-              <span>
-                {otherEditors.map((e) => e.name).join(", ")} {otherEditors.length === 1 ? "is" : "are"} also editing this
-                card. Whoever saves last wins.
-              </span>
+              {lockState.status === "locked" && lockState.canTakeOver && onTakeOver && (
+                <Button type="button" size="sm" variant="outline" onClick={onTakeOver}>
+                  Take over editing
+                </Button>
+              )}
             </div>
           )}
+
+          {saveError && (
+            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg border border-destructive/20" role="alert">
+              {saveError}
+            </div>
+          )}
+
+          <fieldset disabled={readOnly} className="space-y-4 min-w-0 border-0 p-0 m-0" data-testid="card-fields">
 
           {/* Title */}
           <div className="space-y-2">
@@ -522,7 +558,9 @@ export function CardDialog({
             />
           </div>
 
-          {/* Comments Section - Only show when editing existing card */}
+          </fieldset>
+
+          {/* Comments Section - Only show when editing existing card (allowed even while locked) */}
           {cardId && (
             <div className="space-y-3 pt-2 border-t border-border">
               <div className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -627,7 +665,7 @@ export function CardDialog({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={!title.trim()}
+            disabled={!title.trim() || readOnly || saving}
           >
             {initialCard ? "Update" : "Create"}
           </Button>

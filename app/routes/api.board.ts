@@ -14,6 +14,7 @@ import { detectCardMoves } from "~/lib/card-diff";
 import { logAudit } from "~/lib/audit.server";
 import { notifyCardMoved } from "~/lib/notifications.server";
 import { broadcastBoardChanged, clientRealtimeConfig } from "~/lib/realtime.server";
+import { getActiveLocks } from "~/lib/card-locks.server";
 
 // GET /api/board?boardId= - Get a kanban board (defaults to the user's own board)
 export const loader = api("fetch board", async ({ request }: { request: Request }) => {
@@ -32,6 +33,7 @@ export const loader = api("fetch board", async ({ request }: { request: Request 
     .where(and(eq(cards.boardId, board.id), isNull(cards.archivedAt)));
 
   const serialized = await serializeCards(boardCards);
+  const locks = await getActiveLocks(serialized.map((c) => c.id));
 
   return json({
     board: { id: board.id, name: board.name, role },
@@ -42,7 +44,7 @@ export const loader = api("fetch board", async ({ request }: { request: Request 
       title: col.title,
       cardIds: JSON.parse(col.cardIds),
     })),
-    cards: Object.fromEntries(serialized.map((c) => [c.id, c])),
+    cards: Object.fromEntries(serialized.map((c) => [c.id, { ...c, lock: locks.get(c.id) ?? null }])),
   });
 });
 

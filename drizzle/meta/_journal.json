@@ -29,6 +29,13 @@
       "when": 1793825132020,
       "tag": "0003_realtime_presence",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793825546779,
+      "tag": "0004_card_locks",
+      "breakpoints": true
     }
   ]
 }

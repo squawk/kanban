@@ -9,6 +9,7 @@ import { diffCard } from "~/lib/card-diff";
 import { logAudit } from "~/lib/audit.server";
 import { notifyCardAssigned } from "~/lib/notifications.server";
 import { broadcastBoardChanged } from "~/lib/realtime.server";
+import { assertNotLockedByOther } from "~/lib/card-locks.server";
 
 const PRIORITIES = ["low", "medium", "high"];
 
@@ -39,6 +40,11 @@ export const action = api(
         assigneeId?: string | null;
       }>(request);
       const { title, notes, generatedPrompt, dueDate, priority, tagIds, assigneeId } = body;
+
+      // Only the lock holder may edit. Saving an AI-generated prompt doesn't touch the
+      // fields being edited, so it's allowed while someone else has the card open.
+      const onlyPrompt = Object.keys(body).every((k) => k === "generatedPrompt");
+      if (!onlyPrompt) await assertNotLockedByOther(card.id, user.id);
 
       if (title !== undefined && (!title || title.length > INPUT_LIMITS.cardTitle)) {
         return jsonError(`Title is required and must be ${INPUT_LIMITS.cardTitle} characters or less`, 400);
@@ -120,6 +126,7 @@ export const action = api(
     }
 
     if (request.method === "DELETE") {
+      await assertNotLockedByOther(card.id, user.id);
       // Archive the card instead of deleting: remove from all columns of its board
       const now = new Date();
       await db.transaction(async (tx) => {

@@ -24,9 +24,11 @@ import type {
   KanbanCard as KanbanCardType,
   KanbanBoard as KanbanBoardType,
   BoardMember,
+  UserSummary,
   CurrentUser,
 } from "~/lib/types";
 import { apiFetch } from "~/lib/api";
+import { useCardLock } from "~/lib/use-card-lock";
 import {
   subscribeToBoard,
   type BoardSubscription,
@@ -125,7 +127,10 @@ export function KanbanBoard({
   const [viewers, setViewers] = useState<BoardViewer[]>([]);
   const subscriptionRef = useRef<BoardSubscription | null>(null);
 
+  const lockRecheckRef = useRef<(() => void) | null>(null);
   const refresh = useCallback(() => {
+    // A lock may have been released or taken over: re-check the open card's lock right away
+    lockRecheckRef.current?.();
     if (busyRef.current || document.visibilityState !== "visible") {
       pendingRefreshRef.current = true;
       return;
@@ -169,22 +174,32 @@ export function KanbanBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeTopic, refresh, currentUser?.id]);
 
-  // Presence: let others see which card you have open
-  const editingCardIdForPresence = isCardDialogOpen && editingCard ? editingCard.id : null;
-  useEffect(() => {
-    subscriptionRef.current?.setEditing(editingCardIdForPresence);
-  }, [editingCardIdForPresence, liveStatus]);
-
   // Only trust presence from current board members (it's client-reported)
   const memberById = new Map(members.map((m) => [m.id, m]));
   const viewerIds = new Set(viewers.filter((v) => memberById.has(v.userId)).map((v) => v.userId));
-  const editorsByCard = new Map<string, BoardMember[]>();
-  for (const v of viewers) {
-    const member = memberById.get(v.userId);
-    if (!member || !v.editingCardId || v.userId === currentUser?.id) continue;
-    editorsByCard.set(v.editingCardId, [...(editorsByCard.get(v.editingCardId) ?? []), member]);
-  }
   const otherViewerCount = [...viewerIds].filter((id) => id !== currentUser?.id).length;
+
+  // Edit locks (server-side, authoritative): who else is editing which card
+  const lockedByOther = new Map<string, UserSummary>();
+  for (const card of Object.values(board.cards)) {
+    if (card.lock && card.lock.userId !== currentUser?.id) {
+      lockedByOther.set(
+        card.id,
+        memberById.get(card.lock.userId) ?? { id: card.lock.userId, name: card.lock.name, email: "" }
+      );
+    }
+  }
+
+  // Hold the lock for the card open in the edit dialog
+  const [saveError, setSaveError] = useState<string | undefined>();
+  const cardLock = useCardLock(isCardDialogOpen && editingCard ? editingCard.id : null, {
+    // We waited for (or took over from) another editor: show their latest saved version
+    onReacquired: async (cardId) => {
+      const fresh = await fetchBoard();
+      if (fresh?.cards?.[cardId]) setEditingCard(fresh.cards[cardId]);
+    },
+  });
+  lockRecheckRef.current = isCardDialogOpen && editingCard ? cardLock.recheck : null;
 
   useEffect(() => {
     if (!isShared) return;
@@ -221,13 +236,14 @@ export function KanbanBoard({
     }
   };
 
-  const fetchBoard = async () => {
+  const fetchBoard = async (): Promise<KanbanBoardType | null> => {
     try {
       const response = await apiFetch(`/api/board${boardQuery}`);
       if (response.ok) {
         const data = await response.json();
         setBoard(data);
         if (data.board) onBoardLoaded?.(data.board);
+        return data;
       } else if (response.status === 404 && boardId) {
         // Removed from this shared board (or it was deleted): go back to your own board
         onLeftBoard?.();
@@ -239,6 +255,7 @@ export function KanbanBoard({
     } finally {
       setLoading(false);
     }
+    return null;
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -401,7 +418,8 @@ export function KanbanBoard({
     priority: 'low' | 'medium' | 'high';
     tagIds: string[];
     assigneeId?: string | null;
-  }) => {
+  }): Promise<boolean> => {
+    setSaveError(undefined);
     if (editingCard) {
       // Update existing card
       try {
@@ -418,6 +436,12 @@ export function KanbanBoard({
           }),
         });
 
+        if (response.status === 423) {
+          // Someone else holds the edit lock: keep the dialog open so nothing is lost
+          const body = await response.json().catch(() => ({}));
+          setSaveError(body.error || "Someone else is editing this card");
+          return false;
+        }
         if (response.ok) {
           // Refresh board to get updated card with tags
           await fetchBoard();
@@ -454,6 +478,7 @@ export function KanbanBoard({
     setIsCardDialogOpen(false);
     setEditingCard(null);
     setTargetColumnId(null);
+    return true;
   };
 
   const handleDeleteCard = async (cardId: string) => {
@@ -461,6 +486,12 @@ export function KanbanBoard({
       const response = await apiFetch(`/api/cards/${cardId}`, {
         method: "DELETE",
       });
+
+      if (response.status === 423) {
+        const body = await response.json().catch(() => ({}));
+        window.alert(body.error || "Someone else is editing this card");
+        return;
+      }
 
       if (response.ok) {
         // Poof/smoke effect for archive
@@ -578,11 +609,8 @@ export function KanbanBoard({
       await apiFetch(`/api/cards/${card.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: card.title,
-          notes: card.notes,
-          generatedPrompt: data.prompt,
-        }),
+        // Only the prompt: re-sending title/notes could overwrite someone else's edits
+        body: JSON.stringify({ generatedPrompt: data.prompt }),
       });
 
       // Update local state
@@ -769,7 +797,7 @@ export function KanbanBoard({
                         ? card.assigneeId === currentUser?.id
                         : !card.assigneeId
                   )}
-                editorsByCard={editorsByCard}
+                lockedByOther={lockedByOther}
                 onAddCard={handleAddCard}
                 onEditCard={handleEditCard}
                 onDeleteCard={handleDeleteCard}
@@ -797,7 +825,10 @@ export function KanbanBoard({
 
       <CardDialog
         open={isCardDialogOpen}
-        onOpenChange={setIsCardDialogOpen}
+        onOpenChange={(open) => {
+          setIsCardDialogOpen(open);
+          if (!open) setSaveError(undefined);
+        }}
         onSave={handleSaveCard}
         initialCard={editingCard || undefined}
         cardId={editingCard?.id}
@@ -806,7 +837,9 @@ export function KanbanBoard({
         onColumnChange={handleColumnChange}
         members={board.members}
         currentUserId={currentUser?.id}
-        otherEditors={editingCard ? editorsByCard.get(editingCard.id) : undefined}
+        lockState={editingCard ? cardLock.state : undefined}
+        onTakeOver={cardLock.takeOver}
+        saveError={saveError}
       />
 
       <ColumnDialog

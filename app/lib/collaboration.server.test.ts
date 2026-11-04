@@ -58,11 +58,13 @@ import * as myTasks from "~/routes/api.my-tasks";
 import * as cron from "~/routes/api.cron.due-reminders";
 import * as reminders from "~/lib/due-reminders.server";
 import * as realtimeToken from "~/routes/api.realtime-token";
+import * as cardLock from "~/routes/api.cards.$cardId.lock";
+import * as locks from "~/lib/card-locks.server";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const m: Record<string, any> = {
   auth, notifications, login: login_, register, acceptInvite, me, adminUsers, adminInvites, adminSettings,
-  adminAudit, board, boards, members, cards, card, comments, activity, column, myTasks, cron, reminders, realtimeToken,
+  adminAudit, board, boards, members, cards, card, comments, activity, column, myTasks, cron, reminders, realtimeToken, cardLock, locks,
 };
 let ipCounter = 0;
 
@@ -593,5 +595,126 @@ describe("realtime tokens", () => {
 
     const boardRes = await body(await m.board.loader({ request: req("/api/board", { cookie: ownerCookie }) }));
     expect(boardRes.realtime).toMatchObject({ private: true, key: "pk", topic: claims.kanban_topic });
+  });
+});
+
+describe("card locks", () => {
+  let owner: { id: string; email: string };
+  let member: { id: string; email: string };
+  let ownerCookie: string;
+  let memberCookie: string;
+  let boardId: string;
+  let cardId: string;
+
+  const lock = (cookie: string, body?: unknown) =>
+    m.cardLock.action({ request: req("/x", { method: "POST", cookie, body: body ?? {} }), params: { cardId } });
+  const unlock = (cookie: string) => m.cardLock.action({ request: req("/x", { method: "DELETE", cookie }), params: { cardId } });
+  const edit = (cookie: string, body: unknown) => m.card.action({ request: req("/x", { method: "PUT", cookie, body }), params: { cardId } });
+
+  beforeAll(async () => {
+    owner = await createActiveUser("lock-owner@acme.com", "Lena Owner");
+    member = await createActiveUser("lock-member@acme.com", "Max Member");
+    ownerCookie = await login(owner.email);
+    memberCookie = await login(member.email);
+    const data = await body(await m.board.loader({ request: req("/api/board", { cookie: ownerCookie }) }));
+    boardId = data.board.id;
+    await m.members.action({ request: req("/x", { method: "POST", cookie: ownerCookie, body: { userId: member.id } }), params: { boardId } });
+    cardId = (await body(await m.cards.action({
+      request: req("/api/cards", { method: "POST", cookie: ownerCookie, body: { title: "Lockable", columnId: data.columns[0].id } }),
+    }))).id;
+  });
+
+  it("gives the lock to the first editor and tells others who holds it", async () => {
+    const first = await lock(memberCookie);
+    expect(first.status).toBe(200);
+    expect(await body(first)).toMatchObject({ locked: true, ttlMs: locks.LOCK_TTL_MS });
+
+    const second = await lock(ownerCookie);
+    expect(second.status).toBe(409);
+    expect(await body(second)).toMatchObject({ code: "CARD_LOCKED", lock: { userId: member.id, name: "Max Member" }, canTakeOver: true });
+
+    // Renewal by the holder keeps working
+    expect((await lock(memberCookie)).status).toBe(200);
+
+    const board = await body(await m.board.loader({ request: req(`/api/board?boardId=${boardId}`, { cookie: ownerCookie }) }));
+    expect(board.cards[cardId].lock).toMatchObject({ userId: member.id, name: "Max Member" });
+  });
+
+  it("blocks edits and archiving by anyone but the holder", async () => {
+    const blocked = await edit(ownerCookie, { title: "Clobbered" });
+    expect(blocked.status).toBe(423);
+    expect((await body(blocked)).error).toBe("Max Member is editing this card right now");
+    const archive = await m.card.action({ request: req("/x", { method: "DELETE", cookie: ownerCookie }), params: { cardId } });
+    expect(archive.status).toBe(423);
+
+    // Saving an AI prompt doesn't touch edited fields, so it's still allowed
+    expect((await edit(ownerCookie, { generatedPrompt: "prompt" })).status).toBe(200);
+
+    const ok = await edit(memberCookie, { title: "Edited by holder" });
+    expect(ok.status).toBe(200);
+  });
+
+  it("only lets the board owner take over, and audits it", async () => {
+    // Members can't force
+    await unlock(memberCookie);
+    await lock(ownerCookie);
+    expect((await lock(memberCookie, { force: true })).status).toBe(403);
+    await unlock(ownerCookie);
+
+    await lock(memberCookie);
+    const takeover = await lock(ownerCookie, { force: true });
+    expect(takeover.status).toBe(200);
+    // The previous holder's renewal now fails and their edits are refused
+    expect((await lock(memberCookie)).status).toBe(409);
+    expect((await edit(memberCookie, { title: "Too late" })).status).toBe(423);
+
+    const activity = await body(await m.activity.loader({ request: req("/x", { cookie: ownerCookie }), params: { cardId } }));
+    expect(activity.map((a: { action: string }) => a.action)).toContain("card.lock_taken_over");
+  });
+
+  it("frees the lock on release or expiry", async () => {
+    // Releasing someone else's lock does nothing
+    expect(await body(await unlock(memberCookie))).toEqual({ released: false });
+    expect(await body(await unlock(ownerCookie))).toEqual({ released: true });
+    expect((await lock(memberCookie)).status).toBe(200);
+
+    // Simulate a closed tab: the lease runs out without renewal
+    const later = new Date(Date.now() + locks.LOCK_TTL_MS + 1000);
+    expect(await m.locks.getActiveLock(cardId, later)).toBeNull();
+    const result = await m.locks.acquireCardLock(cardId, owner.id, { now: later });
+    expect(result.ok).toBe(true);
+  });
+
+  it("keeps the original acquire time on renewal and resets it for a new holder", async () => {
+    const { db } = await import("~/lib/db");
+    const { cardLocks } = await import("~/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const acquiredAt = async () => (await db.select().from(cardLocks).where(eq(cardLocks.cardId, cardId)))[0]?.acquiredAt;
+    await m.locks.releaseCardLock(cardId, owner.id);
+    await m.locks.releaseCardLock(cardId, member.id);
+
+    const t0 = new Date("2030-01-01T00:00:00Z");
+    expect((await m.locks.acquireCardLock(cardId, member.id, { now: t0 })).ok).toBe(true);
+    const t1 = new Date(t0.getTime() + 30_000);
+    expect((await m.locks.acquireCardLock(cardId, member.id, { now: t1 })).ok).toBe(true); // renewal
+    expect((await acquiredAt())?.toISOString()).toBe(t0.toISOString());
+
+    const t2 = new Date(t1.getTime() + m.locks.LOCK_TTL_MS + 1); // expired, new holder
+    expect((await m.locks.acquireCardLock(cardId, owner.id, { now: t2 })).ok).toBe(true);
+    expect((await acquiredAt())?.toISOString()).toBe(t2.toISOString());
+    await m.locks.releaseCardLock(cardId, owner.id);
+  });
+
+  it("resolves a race so exactly one editor wins", async () => {
+    const racer = await createActiveUser("lock-racer@acme.com", "Rae Racer");
+    await m.members.action({ request: req("/x", { method: "POST", cookie: ownerCookie, body: { userId: racer.id } }), params: { boardId } });
+    const fresh = (await body(await m.cards.action({
+      request: req("/api/cards", { method: "POST", cookie: ownerCookie, body: { title: "Race", columnId: (await body(await m.board.loader({ request: req(`/api/board?boardId=${boardId}`, { cookie: ownerCookie }) }))).columns[0].id } }),
+    }))).id;
+    const results = await Promise.all([
+      m.locks.acquireCardLock(fresh, member.id),
+      m.locks.acquireCardLock(fresh, racer.id),
+    ]);
+    expect(results.filter((r: { ok: boolean }) => r.ok)).toHaveLength(1);
   });
 });

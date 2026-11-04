@@ -202,6 +202,19 @@ export const dueReminders = pgTable(
   (t) => [primaryKey({ columns: [t.cardId, t.kind, t.dueDay] })]
 );
 
+// Edit locks: a lease held by whoever has the card's edit dialog open. Expired rows
+// are treated as free (and overwritten), so a closed tab can't keep a card locked.
+export const cardLocks = pgTable(
+  "card_locks",
+  {
+    cardId: text("card_id").primaryKey().references(() => cards.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    acquiredAt: ts("acquired_at").notNull().defaultNow(),
+    expiresAt: ts("expires_at").notNull(),
+  },
+  (t) => [index("idx_card_locks_user_id").on(t.userId)]
+);
+
 // Key/value app settings editable by admins (e.g. sign-up policy)
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
@@ -226,3 +239,4 @@ export type BoardMember = typeof boardMembers.$inferSelect;
 export type Invitation = typeof invitations.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type UserRole = User["role"];
+export type CardLock = typeof cardLocks.$inferSelect;
