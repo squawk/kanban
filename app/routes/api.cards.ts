@@ -8,6 +8,7 @@ import { json, jsonError, readJson } from "~/lib/http";
 import { INPUT_LIMITS } from "~/lib/security";
 import { logAudit } from "~/lib/audit.server";
 import { notifyCardAssigned } from "~/lib/notifications.server";
+import { recordInitialRevision } from "~/lib/card-update.server";
 
 const PRIORITIES = ["low", "medium", "high"];
 
@@ -65,6 +66,10 @@ export const action = api("create card", async ({ request }: { request: Request 
     for (const tagId of validTagIds) {
       await tx.insert(cardTags).values({ cardId, tagId, createdAt: now });
     }
+
+    // History starts at creation (version 1)
+    const created = (await tx.select().from(cards).where(eq(cards.id, cardId)).then(firstRow))!;
+    await recordInitialRevision(tx, created, user);
   });
 
   const newCard = (await db.select().from(cards).where(eq(cards.id, cardId)).limit(1).then(firstRow))!;

@@ -60,11 +60,12 @@ import * as reminders from "~/lib/due-reminders.server";
 import * as realtimeToken from "~/routes/api.realtime-token";
 import * as cardLock from "~/routes/api.cards.$cardId.lock";
 import * as locks from "~/lib/card-locks.server";
+import * as revisions from "~/routes/api.cards.$cardId.revisions";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const m: Record<string, any> = {
   auth, notifications, login: login_, register, acceptInvite, me, adminUsers, adminInvites, adminSettings,
-  adminAudit, board, boards, members, cards, card, comments, activity, column, myTasks, cron, reminders, realtimeToken, cardLock, locks,
+  adminAudit, board, boards, members, cards, card, comments, activity, column, myTasks, cron, reminders, realtimeToken, cardLock, locks, revisions,
 };
 let ipCounter = 0;
 
@@ -716,5 +717,137 @@ describe("card locks", () => {
       m.locks.acquireCardLock(fresh, racer.id),
     ]);
     expect(results.filter((r: { ok: boolean }) => r.ok)).toHaveLength(1);
+  });
+});
+
+describe("card history and undo", () => {
+  let owner: { id: string; email: string };
+  let mate: { id: string; email: string };
+  let ownerCookie: string;
+  let mateCookie: string;
+  let boardId: string;
+  let columnId: string;
+  let tagId: string;
+
+  const put = (cookie: string, cardId: string, b: unknown) =>
+    m.card.action({ request: req("/x", { method: "PUT", cookie, body: b }), params: { cardId } });
+  const history = async (cookie: string, cardId: string) =>
+    body(await m.revisions.loader({ request: req("/x", { cookie }), params: { cardId } }));
+  const restore = (cookie: string, cardId: string, b: unknown) =>
+    m.revisions.action({ request: req("/x", { method: "POST", cookie, body: b }), params: { cardId } });
+  const boardCard = async (cardId: string) =>
+    (await body(await m.board.loader({ request: req(`/api/board?boardId=${boardId}`, { cookie: ownerCookie }) }))).cards[cardId];
+
+  beforeAll(async () => {
+    owner = await createActiveUser("hist-owner@acme.com", "Hana History");
+    mate = await createActiveUser("hist-mate@acme.com", "Milo Mate");
+    ownerCookie = await login(owner.email);
+    mateCookie = await login(mate.email);
+    const data = await body(await m.board.loader({ request: req("/api/board", { cookie: ownerCookie }) }));
+    boardId = data.board.id;
+    columnId = data.columns[0].id;
+    await m.members.action({ request: req("/x", { method: "POST", cookie: ownerCookie, body: { userId: mate.id } }), params: { boardId } });
+    const tagsRoute = await import("~/routes/api.tags");
+    tagId = (await body(await tagsRoute.loader({ request: req("/api/tags", { cookie: ownerCookie }) })))[0].id;
+  });
+
+  async function newCard(title: string) {
+    return (await body(await m.cards.action({
+      request: req("/api/cards", { method: "POST", cookie: ownerCookie, body: { title, notes: "first notes", columnId, priority: "low" } }),
+    }))).id as string;
+  }
+
+  it("records version 1 at creation and a version per change, with who and what", async () => {
+    const id = await newCard("History card");
+    expect((await boardCard(id)).version).toBe(1);
+
+    const res = await put(ownerCookie, id, { title: "History card v2", priority: "high", tagIds: [tagId], expectedVersion: 1 });
+    expect(res.status).toBe(200);
+    expect((await body(res)).revision).toEqual({ version: 2, previousVersion: 1 });
+
+    await put(mateCookie, id, { notes: "mate's notes", expectedVersion: 2 });
+    const h = await history(ownerCookie, id);
+    expect(h.map((r: any) => r.version)).toEqual([3, 2, 1]);
+    expect(h[0]).toMatchObject({ notes: "mate's notes", changedFields: ["notes"], actor: { name: "Milo Mate" } });
+    expect(h[1]).toMatchObject({ title: "History card v2", priority: "high", changedFields: ["title", "priority", "tags"] });
+    expect(h[1].tags.map((t: any) => t.id)).toEqual([tagId]);
+    expect(h[2]).toMatchObject({ title: "History card", notes: "first notes", changedFields: [] });
+
+    // No-op saves and AI-prompt saves don't create versions
+    await put(ownerCookie, id, { title: "History card v2", expectedVersion: 3 });
+    await put(ownerCookie, id, { generatedPrompt: "prompt" });
+    expect((await history(ownerCookie, id)).length).toBe(3);
+  });
+
+  it("refuses a save based on an outdated version", async () => {
+    const id = await newCard("Conflict card");
+    await put(mateCookie, id, { title: "Mate saved first", expectedVersion: 1 });
+    const stale = await put(ownerCookie, id, { title: "Owner from stale copy", expectedVersion: 1 });
+    expect(stale.status).toBe(409);
+    expect((await body(stale)).code).toBe("CARD_VERSION_CONFLICT");
+    expect((await boardCard(id)).title).toBe("Mate saved first");
+  });
+
+  it("undoes the last change by restoring the previous version, as a new version", async () => {
+    const id = await newCard("Undo card");
+    const saved = await body(await put(ownerCookie, id, { title: "Oops", notes: "wiped", priority: "high", tagIds: [tagId], expectedVersion: 1 }));
+    const undo = await restore(ownerCookie, id, { version: saved.revision.previousVersion, expectedVersion: saved.revision.version });
+    expect(undo.status).toBe(200);
+    const u = await body(undo);
+    expect(u.revision).toEqual({ version: 3, previousVersion: 2 });
+    expect(u.card).toMatchObject({ title: "Undo card", notes: "first notes", priority: "low", tags: [] });
+
+    const h = await history(ownerCookie, id);
+    expect(h[0]).toMatchObject({ version: 3, restoredFromVersion: 1 });
+    // ...so the undo can itself be undone
+    const redo = await body(await restore(ownerCookie, id, { version: 2, expectedVersion: 3 }));
+    expect(redo.card.title).toBe("Oops");
+
+    const activity = await body(await m.activity.loader({ request: req("/x", { cookie: ownerCookie }), params: { cardId: id } }));
+    expect(activity.filter((a: any) => a.action === "card.version_restored")).toHaveLength(2);
+  });
+
+  it("won't undo over someone else's newer change", async () => {
+    const id = await newCard("Race undo");
+    const mine = await body(await put(ownerCookie, id, { title: "Mine", expectedVersion: 1 }));
+    await put(mateCookie, id, { title: "Theirs", expectedVersion: 2 });
+    const res = await restore(ownerCookie, id, { version: mine.revision.previousVersion, expectedVersion: mine.revision.version });
+    expect(res.status).toBe(409);
+    expect((await boardCard(id)).title).toBe("Theirs");
+  });
+
+  it("respects locks and drops assignees who left the board", async () => {
+    const id = await newCard("Lock + assignee");
+    await put(ownerCookie, id, { assigneeId: mate.id, expectedVersion: 1 }); // v2 assigned to mate
+    await put(ownerCookie, id, { title: "Renamed", expectedVersion: 2 }); // v3
+
+    // Someone else holding the lock blocks a restore
+    await m.cardLock.action({ request: req("/x", { method: "POST", cookie: mateCookie, body: {} }), params: { cardId: id } });
+    expect((await restore(ownerCookie, id, { version: 2 })).status).toBe(423);
+    await m.cardLock.action({ request: req("/x", { method: "DELETE", cookie: mateCookie }), params: { cardId: id } });
+
+    // Mate leaves the board; restoring v2 can't re-assign them
+    await m.members.action({ request: req("/x", { method: "DELETE", cookie: ownerCookie, body: { userId: mate.id } }), params: { boardId } });
+    const res = await body(await restore(ownerCookie, id, { version: 2 }));
+    expect(res.card.title).toBe("Lock + assignee");
+    expect(res.card.assigneeId).toBeNull();
+    expect(res.warnings[0]).toMatch(/no longer on this board/);
+
+    expect((await restore(ownerCookie, id, { version: 99 })).status).toBe(404);
+    expect((await m.revisions.loader({ request: req("/x", { cookie: mateCookie }), params: { cardId: id } })).status).toBe(404);
+  });
+
+  it("creates a baseline for cards that existed before history", async () => {
+    const id = await newCard("Legacy card");
+    const { db } = await import("~/lib/db");
+    const { cardRevisions } = await import("~/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.delete(cardRevisions).where(eq(cardRevisions.cardId, id)); // simulate a pre-history card
+    expect((await boardCard(id)).version).toBe(0);
+
+    const res = await body(await put(ownerCookie, id, { title: "Legacy edited", expectedVersion: 0 }));
+    expect(res.revision).toEqual({ version: 2, previousVersion: 1 });
+    const h = await history(ownerCookie, id);
+    expect(h[1]).toMatchObject({ version: 1, title: "Legacy card", actor: null });
   });
 });

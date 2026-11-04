@@ -72,6 +72,8 @@ export interface KanbanCard {
   assigneeId?: string | null;
   assignee?: UserSummary | null;
   createdBy?: UserSummary | null;
+  /** Latest edit-history version (0 = no history yet) */
+  version?: number;
   /** Active edit lock (someone has the card open in the edit dialog) */
   lock?: { userId: string; name: string; expiresAt: string } | null;
   createdAt: string;

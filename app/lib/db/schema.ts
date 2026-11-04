@@ -1,4 +1,4 @@
-import { bigint, boolean, index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
 const createdAt = () => ts("created_at").notNull().defaultNow();
@@ -215,6 +215,33 @@ export const cardLocks = pgTable(
   (t) => [index("idx_card_locks_user_id").on(t.userId)]
 );
 
+// Card edit history: a full snapshot of the editable fields after each change, so any
+// version can be viewed and restored (restoring adds a new version; nothing is lost).
+export const cardRevisions = pgTable(
+  "card_revisions",
+  {
+    id: text("id").primaryKey(),
+    cardId: text("card_id").notNull().references(() => cards.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    title: text("title").notNull(),
+    notes: text("notes").notNull(),
+    priority: text("priority").notNull(),
+    dueDate: ts("due_date"),
+    // Plain ids (no FK) so history survives the user or tag being deleted
+    assigneeId: text("assignee_id"),
+    /** JSON: [{ id, name, color }] at the time of the revision */
+    tags: text("tags").notNull().default("[]"),
+    /** JSON: field names changed by this revision (empty for a baseline) */
+    changedFields: text("changed_fields").notNull().default("[]"),
+    actorId: text("actor_id"),
+    actorName: text("actor_name"),
+    /** Set when this revision restored an earlier version */
+    restoredFromVersion: integer("restored_from_version"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("uq_card_revisions_card_version").on(t.cardId, t.version)]
+);
+
 // Key/value app settings editable by admins (e.g. sign-up policy)
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
@@ -240,3 +267,4 @@ export type Invitation = typeof invitations.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type UserRole = User["role"];
 export type CardLock = typeof cardLocks.$inferSelect;
+export type CardRevision = typeof cardRevisions.$inferSelect;

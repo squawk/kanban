@@ -14,6 +14,7 @@ import { MessageSquare, Send, Calendar, Tag as TagIcon, AlertCircle, Plus, Colum
 import { UserAvatar } from "./UserAvatar";
 import type { CardLockState } from "~/lib/use-card-lock";
 import { Lock } from "lucide-react";
+import { CardHistory } from "./CardHistory";
 
 interface CardDialogProps {
   open: boolean;
@@ -39,6 +40,14 @@ interface CardDialogProps {
   onTakeOver?: () => void;
   /** Error from the last save attempt (e.g. the card was locked) */
   saveError?: string;
+  /** The save failed because someone else saved first: offer to load their version */
+  onReloadLatest?: () => void;
+  /** Restore a previous version from the history panel */
+  onRestoreVersion?: (version: number, latestVersion: number) => Promise<void>;
+  /** Changes whenever the card's history changes (reloads the panel) */
+  historyRefreshKey?: unknown;
+  /** Status shown inside the dialog, e.g. "Restored version 3 · Undo" (toasts can't be clicked behind a modal) */
+  notice?: { message: string; actionLabel?: string; onAction?: () => void };
 }
 
 export function CardDialog({
@@ -55,6 +64,10 @@ export function CardDialog({
   lockState,
   onTakeOver,
   saveError,
+  onReloadLatest,
+  onRestoreVersion,
+  historyRefreshKey,
+  notice,
 }: CardDialogProps) {
   // Existing cards are editable only while we hold the edit lock. If the lock
   // service is unreachable ("error") we allow editing; the server still enforces on save.
@@ -329,9 +342,33 @@ export function CardDialog({
             </div>
           )}
 
+          {notice && (
+            <div
+              className="flex flex-wrap items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-800 dark:text-green-300"
+              role="status"
+              data-testid="dialog-notice"
+            >
+              <span className="flex-1">{notice.message}</span>
+              {notice.actionLabel && notice.onAction && (
+                <Button type="button" size="sm" variant="outline" onClick={notice.onAction}>
+                  {notice.actionLabel}
+                </Button>
+              )}
+            </div>
+          )}
+
           {saveError && (
-            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg border border-destructive/20" role="alert">
-              {saveError}
+            <div
+              className="flex flex-wrap items-center gap-2 bg-destructive/10 text-destructive text-sm p-3 rounded-lg border border-destructive/20"
+              role="alert"
+              data-testid="save-error"
+            >
+              <span className="flex-1">{saveError}</span>
+              {onReloadLatest && (
+                <Button type="button" size="sm" variant="outline" onClick={onReloadLatest}>
+                  Load latest version
+                </Button>
+              )}
             </div>
           )}
 
@@ -653,6 +690,17 @@ export function CardDialog({
                 )
               )}
             </div>
+          )}
+
+          {/* Edit history with restore */}
+          {cardId && onRestoreVersion && (
+            <CardHistory
+              cardId={cardId}
+              members={members ?? []}
+              readOnly={readOnly}
+              refreshKey={historyRefreshKey}
+              onRestore={onRestoreVersion}
+            />
           )}
 
           <p className="text-xs text-muted-foreground">
