@@ -5,6 +5,11 @@
   "compatibility_date": "2025-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+
+  // Run the Worker next to the database (Supabase, AWS us-east-1) instead of in the
+  // data center nearest each visitor. A page load makes several sequential queries, so
+  // it's faster to cross the country once (visitor -> Worker) than on every query.
+  "placement": { "region": "aws:us-east-1" },
   "upload_source_maps": true,
 
   // https://kanban.skyhawklabs.dev (skyhawklabs.dev must be a zone in this Cloudflare account)
