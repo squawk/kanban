@@ -1,12 +1,12 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getIronSession, type SessionOptions, type IronSession } from "iron-session";
-import { db } from "./db";
+import { db, firstRow } from "./db";
 import { users, boards, columns, tags, emailVerificationTokens, passwordResetTokens } from "./db/schema";
 import { eq, and, gt } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { isBootstrapAdminEmail } from "./config";
 
-const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY;
 
 // Session data type
 export interface SessionData {
@@ -77,16 +77,17 @@ export async function createUser(email: string, password: string, name: string) 
   const now = new Date();
 
   // Create user (emailVerified and approved default to false)
-  db.insert(users).values({
+  await db.insert(users).values({
     id: userId,
     email: email.toLowerCase(),
     passwordHash,
     name,
     emailVerified: false,
     approved: false,
+    role: isBootstrapAdminEmail(email) ? "admin" : "member",
     createdAt: now,
     updatedAt: now,
-  }).run();
+  });
 
   // Create default tags if they don't exist
   const defaultTags = [
@@ -98,41 +99,42 @@ export async function createUser(email: string, password: string, name: string) 
     { name: "Design", color: "#ec4899" },
   ];
 
-  for (const tag of defaultTags) {
-    try {
-      db.insert(tags).values({
-        id: nanoid(),
-        name: tag.name,
-        color: tag.color,
-        createdAt: now,
-        updatedAt: now,
-      }).run();
-    } catch {
-      // Tag already exists, ignore
-    }
-  }
+  await db
+    .insert(tags)
+    .values(defaultTags.map((tag) => ({ id: nanoid(), name: tag.name, color: tag.color, createdAt: now, updatedAt: now })))
+    .onConflictDoNothing({ target: tags.name });
 
   return { id: userId, email, name };
 }
 
 // Find user by email
-export function findUserByEmail(email: string) {
-  return db.select().from(users).where(eq(users.email, email.toLowerCase())).get();
+export async function findUserByEmail(email: string) {
+  return await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1).then(firstRow);
 }
 
 // Find user by ID
-export function findUserById(id: string) {
-  return db.select({
+export async function findUserById(id: string) {
+  return await db.select({
     id: users.id,
     email: users.email,
     name: users.name,
+    role: users.role,
+    emailNotifications: users.emailNotifications,
+    disabled: users.disabled,
+    approved: users.approved,
     createdAt: users.createdAt,
-  }).from(users).where(eq(users.id, id)).get();
+  }).from(users).where(eq(users.id, id)).limit(1).then(firstRow);
 }
 
 // Get user's board
-export function getUserBoard(userId: string) {
-  return db.select().from(boards).where(eq(boards.userId, userId)).get();
+export async function getUserBoard(userId: string) {
+  return await db.select().from(boards).where(eq(boards.userId, userId)).limit(1).then(firstRow);
+}
+
+// True if the user exists, is approved, and isn't disabled
+export async function isActiveUser(userId: string): Promise<boolean> {
+  const u = await db.select({ approved: users.approved, disabled: users.disabled }).from(users).where(eq(users.id, userId)).limit(1).then(firstRow);
+  return !!u && u.approved && !u.disabled;
 }
 
 // Check if user is authenticated
@@ -151,6 +153,7 @@ export async function requireAuth(request: Request): Promise<SessionData & { use
 
 // Verify reCAPTCHA token
 export async function verifyRecaptcha(token: string): Promise<boolean> {
+  const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY;
   if (!RECAPTCHA_SECRET_KEY) {
     console.warn("reCAPTCHA secret key not configured, skipping verification");
     return true;
@@ -177,127 +180,124 @@ function generateToken(): string {
 }
 
 // Create email verification token
-export function createEmailVerificationToken(userId: string): string {
+export async function createEmailVerificationToken(userId: string): Promise<string> {
   const token = generateToken();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
 
   // Delete any existing tokens for this user
-  db.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, userId)).run();
+  await db.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, userId));
 
   // Create new token
-  db.insert(emailVerificationTokens).values({
+  await db.insert(emailVerificationTokens).values({
     id: nanoid(),
     userId,
     token,
     expiresAt,
     createdAt: now,
-  }).run();
+  });
 
   return token;
 }
 
 // Verify email verification token
-export function verifyEmailToken(token: string): { userId: string } | null {
+export async function verifyEmailToken(token: string): Promise<{ userId: string } | null> {
   const now = new Date();
-  const record = db.select()
+  const record = await db.select()
     .from(emailVerificationTokens)
     .where(and(
       eq(emailVerificationTokens.token, token),
       gt(emailVerificationTokens.expiresAt, now)
     ))
-    .get();
+    .limit(1).then(firstRow);
 
   if (!record) return null;
 
   // Delete the token after use
-  db.delete(emailVerificationTokens).where(eq(emailVerificationTokens.id, record.id)).run();
+  await db.delete(emailVerificationTokens).where(eq(emailVerificationTokens.id, record.id));
 
   return { userId: record.userId };
 }
 
 // Create password reset token
-export function createPasswordResetToken(userId: string): string {
+export async function createPasswordResetToken(userId: string): Promise<string> {
   const token = generateToken();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour
 
   // Delete any existing tokens for this user
-  db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId)).run();
+  await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
 
   // Create new token
-  db.insert(passwordResetTokens).values({
+  await db.insert(passwordResetTokens).values({
     id: nanoid(),
     userId,
     token,
     expiresAt,
     createdAt: now,
-  }).run();
+  });
 
   return token;
 }
 
 // Verify password reset token
-export function verifyPasswordResetToken(token: string): { userId: string } | null {
+export async function verifyPasswordResetToken(token: string): Promise<{ userId: string } | null> {
   const now = new Date();
-  const record = db.select()
+  const record = await db.select()
     .from(passwordResetTokens)
     .where(and(
       eq(passwordResetTokens.token, token),
       gt(passwordResetTokens.expiresAt, now)
     ))
-    .get();
+    .limit(1).then(firstRow);
 
   if (!record) return null;
 
   // Delete the token after use
-  db.delete(passwordResetTokens).where(eq(passwordResetTokens.id, record.id)).run();
+  await db.delete(passwordResetTokens).where(eq(passwordResetTokens.id, record.id));
 
   return { userId: record.userId };
 }
 
 // Update user's email verification status
-export function setEmailVerified(userId: string, verified: boolean) {
-  db.update(users)
+export async function setEmailVerified(userId: string, verified: boolean) {
+  await db.update(users)
     .set({ emailVerified: verified, updatedAt: new Date() })
-    .where(eq(users.id, userId))
-    .run();
+    .where(eq(users.id, userId));
 }
 
 // Update user's approval status
-export function setUserApproved(userId: string, approved: boolean) {
-  db.update(users)
+export async function setUserApproved(userId: string, approved: boolean) {
+  await db.update(users)
     .set({ approved, updatedAt: new Date() })
-    .where(eq(users.id, userId))
-    .run();
+    .where(eq(users.id, userId));
 }
 
 // Update user's password
 export async function updatePassword(userId: string, newPassword: string) {
   const passwordHash = await hashPassword(newPassword);
-  db.update(users)
+  await db.update(users)
     .set({ passwordHash, updatedAt: new Date() })
-    .where(eq(users.id, userId))
-    .run();
+    .where(eq(users.id, userId));
 }
 
 // Create user's board (called after approval)
-export function createUserBoard(userId: string) {
+export async function createUserBoard(userId: string) {
   const boardId = nanoid();
   const now = new Date();
 
   // Check if user already has a board
-  const existingBoard = db.select().from(boards).where(eq(boards.userId, userId)).get();
+  const existingBoard = await db.select().from(boards).where(eq(boards.userId, userId)).limit(1).then(firstRow);
   if (existingBoard) return existingBoard;
 
   // Create board
-  db.insert(boards).values({
+  await db.insert(boards).values({
     id: boardId,
     name: "My Board",
     userId,
     createdAt: now,
     updatedAt: now,
-  }).run();
+  });
 
   // Create default columns with unique IDs per user
   const defaultColumns = [
@@ -307,7 +307,7 @@ export function createUserBoard(userId: string) {
   ];
 
   for (const col of defaultColumns) {
-    db.insert(columns).values({
+    await db.insert(columns).values({
       id: nanoid(),
       title: col.title,
       position: col.position,
@@ -315,18 +315,27 @@ export function createUserBoard(userId: string) {
       cardIds: "[]",
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
   }
 
   return { id: boardId };
 }
 
 // Get full user record including verification status
-export function getFullUser(userId: string) {
-  return db.select().from(users).where(eq(users.id, userId)).get();
+export async function getFullUser(userId: string) {
+  return await db.select().from(users).where(eq(users.id, userId)).limit(1).then(firstRow);
+}
+
+// Emails of all active admins (falls back to ADMIN_EMAIL config when none exist yet)
+export async function getAdminRecipientEmails(): Promise<string[]> {
+  const admins = await db
+    .select({ email: users.email })
+    .from(users)
+    .where(and(eq(users.role, "admin"), eq(users.disabled, false)));
+  return admins.map((u) => u.email);
 }
 
 // Delete user and all associated data
-export function deleteUser(userId: string) {
-  db.delete(users).where(eq(users.id, userId)).run();
+export async function deleteUser(userId: string) {
+  await db.delete(users).where(eq(users.id, userId));
 }

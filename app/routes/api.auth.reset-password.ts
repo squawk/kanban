@@ -23,7 +23,7 @@ export async function action({ request }: { request: Request }) {
     }
 
     // Verify the token
-    const result = verifyPasswordResetToken(token);
+    const result = await verifyPasswordResetToken(token);
     if (!result) {
       return new Response(
         JSON.stringify({ error: "Invalid or expired reset token" }),
@@ -35,7 +35,7 @@ export async function action({ request }: { request: Request }) {
     await updatePassword(result.userId, password);
 
     // Get user info
-    const user = getFullUser(result.userId);
+    const user = await getFullUser(result.userId);
 
     return new Response(
       JSON.stringify({

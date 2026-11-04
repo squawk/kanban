@@ -1,124 +1,80 @@
-import { db } from "~/lib/db";
-import { cards, comments } from "~/lib/db/schema";
+import { db, firstRow } from "~/lib/db";
+import { comments, users } from "~/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
-import { getSession, getUserBoard } from "~/lib/auth";
 import { nanoid } from "nanoid";
+import { api, requireCardAccess, requireUser } from "~/lib/access.server";
+import { json, jsonError, readJson } from "~/lib/http";
+import { INPUT_LIMITS } from "~/lib/security";
+import { logAudit } from "~/lib/audit.server";
+import { notifyCardCommented } from "~/lib/notifications.server";
 
-// GET /api/cards/:cardId/comments - Get all comments for a card
-export async function loader({ request, params }: { request: Request; params: { cardId: string } }) {
-  try {
-    const session = await getSession(request);
-    if (!session.userId) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // SECURITY FIX: Verify card belongs to user's board before returning comments
-    const board = getUserBoard(session.userId);
-    if (!board) {
-      return new Response(
-        JSON.stringify({ error: "Board not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const { cardId } = params;
-
-    // Verify card exists and belongs to user's board
-    const card = db.select().from(cards).where(eq(cards.id, cardId)).get();
-    if (!card || card.boardId !== board.id) {
-      return new Response(
-        JSON.stringify({ error: "Card not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const cardComments = db
-      .select()
-      .from(comments)
-      .where(eq(comments.cardId, cardId))
-      .orderBy(asc(comments.createdAt))
-      .all();
-
-    return new Response(JSON.stringify(cardComments), {
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (error) {
-    console.error("Error fetching comments:", error);
-    return new Response(
-      JSON.stringify({ error: "Failed to fetch comments" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
-  }
+function serializeComment(c: typeof comments.$inferSelect, author: { id: string; name: string; email: string } | null) {
+  return {
+    id: c.id,
+    content: c.content,
+    cardId: c.cardId,
+    author,
+    createdAt: c.createdAt.toISOString(),
+    updatedAt: c.updatedAt.toISOString(),
+  };
 }
 
-// POST /api/cards/:cardId/comments - Create a new comment
-export async function action({ request, params }: { request: Request; params: { cardId: string } }) {
-  if (request.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+// GET /api/cards/:cardId/comments - Get all comments for a card
+export const loader = api(
+  "fetch comments",
+  async ({ request, params }: { request: Request; params: { cardId: string } }) => {
+    const user = await requireUser(request);
+    await requireCardAccess(user, params.cardId);
+
+    const rows = await db
+      .select({ comment: comments, author: { id: users.id, name: users.name, email: users.email } })
+      .from(comments)
+      .leftJoin(users, eq(users.id, comments.authorId))
+      .where(eq(comments.cardId, params.cardId))
+      .orderBy(asc(comments.createdAt));
+
+    return json(rows.map((r) => serializeComment(r.comment, r.author?.id ? r.author : null)));
   }
+);
 
-  try {
-    const session = await getSession(request);
-    if (!session.userId) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+// POST /api/cards/:cardId/comments - Create a new comment
+export const action = api(
+  "create comment",
+  async ({ request, params }: { request: Request; params: { cardId: string } }) => {
+    if (request.method !== "POST") return jsonError("Method not allowed", 405);
+
+    const user = await requireUser(request);
+    const { card } = await requireCardAccess(user, params.cardId);
+    const { content } = await readJson<{ content?: string }>(request);
+
+    if (!content || typeof content !== "string" || !content.trim()) {
+      return jsonError("Comment content is required", 400);
     }
-
-    const board = getUserBoard(session.userId);
-    if (!board) {
-      return new Response(
-        JSON.stringify({ error: "Board not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const { cardId } = params;
-    const { content } = await request.json();
-
-    if (!content || !content.trim()) {
-      return new Response(
-        JSON.stringify({ error: "Comment content is required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Verify card exists and belongs to user's board
-    const card = db.select().from(cards).where(eq(cards.id, cardId)).get();
-    if (!card || card.boardId !== board.id) {
-      return new Response(
-        JSON.stringify({ error: "Card not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
+    if (content.length > INPUT_LIMITS.commentContent) {
+      return jsonError(`Comment must be ${INPUT_LIMITS.commentContent} characters or less`, 400);
     }
 
     const commentId = nanoid();
     const now = new Date();
+    const trimmed = content.trim();
 
-    // Create the comment
-    db.insert(comments).values({
-      id: commentId,
-      content: content.trim(),
-      cardId,
-      createdAt: now,
-      updatedAt: now,
-    }).run();
+    await db.insert(comments)
+      .values({ id: commentId, content: trimmed, cardId: card.id, authorId: user.id, createdAt: now, updatedAt: now });
 
-    const newComment = db.select().from(comments).where(eq(comments.id, commentId)).get();
+    const newComment = (await db.select().from(comments).where(eq(comments.id, commentId)).limit(1).then(firstRow))!;
 
-    return new Response(JSON.stringify(newComment), {
-      status: 201,
-      headers: { "Content-Type": "application/json" },
+    await logAudit({
+      actor: user,
+      action: "comment.created",
+      entityType: "card",
+      entityId: card.id,
+      boardId: card.boardId,
+      summary: `Commented on "${card.title}"`,
+      metadata: { commentId, preview: trimmed.slice(0, 140) },
+      request,
     });
-  } catch (error) {
-    console.error("Error creating comment:", error);
-    return new Response(
-      JSON.stringify({ error: "Failed to create comment" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    notifyCardCommented(card, trimmed, user);
+
+    return json(serializeComment(newComment, { id: user.id, name: user.name, email: user.email }), 201);
   }
-}
+);

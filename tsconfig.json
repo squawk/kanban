@@ -1,7 +1,13 @@
 {
   "compilerOptions": {
-    "lib": ["DOM", "DOM.Iterable", "ES2022"],
-    "types": ["@react-router/node", "vite/client"],
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ES2022"
+    ],
+    "types": [
+      "vite/client"
+    ],
     "isolatedModules": true,
     "esModuleInterop": true,
     "jsx": "react-jsx",
@@ -15,10 +21,24 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "~/*": ["./app/*"]
+      "~/*": [
+        "./app/*"
+      ]
     },
     "noEmit": true,
-    "rootDirs": [".", "./.react-router/types"]
+    "rootDirs": [
+      ".",
+      "./.react-router/types"
+    ]
   },
-  "include": ["app/**/*", "react-router.config.ts", ".react-router/types/**/*"]
+  "include": [
+    "app/**/*",
+    "workers/**/*",
+    "react-router.config.ts",
+    "vite.config.ts",
+    ".react-router/types/**/*",
+    "worker-configuration.d.ts",
+    "scripts/**/*",
+    "drizzle.config.ts"
+  ]
 }

@@ -9,8 +9,9 @@ import {
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
-import type { Comment, Tag, KanbanCard, KanbanColumn } from "~/lib/types";
-import { MessageSquare, Send, Calendar, Tag as TagIcon, AlertCircle, Plus, Columns } from "lucide-react";
+import type { ActivityEntry, BoardMember, Comment, Tag, KanbanCard, KanbanColumn } from "~/lib/types";
+import { MessageSquare, Send, Calendar, Tag as TagIcon, AlertCircle, Plus, Columns, User as UserIcon, History } from "lucide-react";
+import { UserAvatar } from "./UserAvatar";
 
 interface CardDialogProps {
   open: boolean;
@@ -21,12 +22,18 @@ interface CardDialogProps {
     dueDate?: string;
     priority: 'low' | 'medium' | 'high';
     tagIds: string[];
+    assigneeId?: string | null;
   }) => void;
   initialCard?: KanbanCard;
   cardId?: string;
   columns?: KanbanColumn[];
   currentColumnId?: string;
   onColumnChange?: (columnId: string) => void;
+  /** People who can be assigned (board owner + members). Enables the assignee picker. */
+  members?: BoardMember[];
+  currentUserId?: string;
+  /** Other people with this card open right now (Realtime presence) */
+  otherEditors?: BoardMember[];
 }
 
 export function CardDialog({
@@ -38,12 +45,20 @@ export function CardDialog({
   columns,
   currentColumnId,
   onColumnChange,
+  members,
+  currentUserId,
+  otherEditors,
 }: CardDialogProps) {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState<string>("");
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [assigneeId, setAssigneeId] = useState<string>("");
+
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [showActivity, setShowActivity] = useState(false);
+  const [loadingActivity, setLoadingActivity] = useState(false);
 
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
@@ -70,6 +85,9 @@ export function CardDialog({
       setDueDate(initialCard?.dueDate ? initialCard.dueDate.split('T')[0] : "");
       setPriority(initialCard?.priority || 'medium');
       setSelectedTagIds(initialCard?.tags?.map(t => t.id) || []);
+      setAssigneeId(initialCard?.assigneeId || "");
+      setShowActivity(false);
+      setActivity([]);
 
       // Fetch comments when editing an existing card
       if (cardId) {
@@ -113,6 +131,27 @@ export function CardDialog({
     }
   };
 
+  const fetchActivity = async () => {
+    if (!cardId) return;
+    setLoadingActivity(true);
+    try {
+      const response = await fetch(`/api/cards/${cardId}/activity`);
+      if (response.ok) {
+        setActivity(await response.json());
+      }
+    } catch (error) {
+      console.error("Error fetching activity:", error);
+    } finally {
+      setLoadingActivity(false);
+    }
+  };
+
+  const toggleActivity = () => {
+    const next = !showActivity;
+    setShowActivity(next);
+    if (next) fetchActivity();
+  };
+
   const handleAddComment = async () => {
     if (!cardId || !newComment.trim()) return;
 
@@ -147,6 +186,7 @@ export function CardDialog({
         dueDate: dueDate || undefined,
         priority,
         tagIds: selectedTagIds,
+        ...(members ? { assigneeId: assigneeId || null } : {}),
       });
       handleClose();
     }
@@ -158,6 +198,7 @@ export function CardDialog({
     setDueDate("");
     setPriority('medium');
     setSelectedTagIds([]);
+    setAssigneeId("");
     setComments([]);
     setNewComment("");
     onOpenChange(false);
@@ -242,6 +283,24 @@ export function CardDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
+          {cardId && otherEditors && otherEditors.length > 0 && (
+            <div
+              className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300"
+              role="status"
+              data-testid="concurrent-editing-warning"
+            >
+              <span className="flex -space-x-1">
+                {otherEditors.slice(0, 3).map((e) => (
+                  <UserAvatar key={e.id} user={e} size="xs" />
+                ))}
+              </span>
+              <span>
+                {otherEditors.map((e) => e.name).join(", ")} {otherEditors.length === 1 ? "is" : "are"} also editing this
+                card. Whoever saves last wins.
+              </span>
+            </div>
+          )}
+
           {/* Title */}
           <div className="space-y-2">
             <label htmlFor="title" className="text-sm font-medium text-foreground">
@@ -291,6 +350,46 @@ export function CardDialog({
               />
             </div>
           </div>
+
+          {/* Assignee */}
+          {members && members.length > 0 && (
+            <div className="space-y-2">
+              <label htmlFor="assignee" className="text-sm font-medium text-foreground flex items-center gap-1">
+                <UserIcon className="h-3 w-3" />
+                Assignee
+              </label>
+              <div className="flex items-center gap-2">
+                <select
+                  id="assignee"
+                  value={assigneeId}
+                  onChange={(e) => setAssigneeId(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-border rounded-md bg-card text-foreground text-sm"
+                >
+                  <option value="">Unassigned</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}{m.id === currentUserId ? " (me)" : ""}
+                    </option>
+                  ))}
+                  {/* Keep a former member visible if still assigned */}
+                  {assigneeId && !members.some((m) => m.id === assigneeId) && initialCard?.assignee && (
+                    <option value={assigneeId}>{initialCard.assignee.name} (no longer on board)</option>
+                  )}
+                </select>
+                {currentUserId && assigneeId !== currentUserId && members.some((m) => m.id === currentUserId) && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => setAssigneeId(currentUserId)}
+                  >
+                    Assign to me
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Status - Only show when editing existing card */}
           {cardId && columns && columns.length > 0 && onColumnChange && (
@@ -442,11 +541,17 @@ export function CardDialog({
                       key={comment.id}
                       className="bg-muted rounded-lg p-3 space-y-1"
                     >
-                      <p className="text-sm text-foreground">
+                      <div className="flex items-center gap-2">
+                        {comment.author && <UserAvatar user={comment.author} size="xs" />}
+                        <span className="text-xs font-medium text-foreground">
+                          {comment.author?.name ?? "Unknown"}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDate(comment.createdAt)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground whitespace-pre-wrap">
                         {comment.content}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatDate(comment.createdAt)}
                       </p>
                     </div>
                   ))}
@@ -476,6 +581,39 @@ export function CardDialog({
                   {addingComment ? "Adding..." : "Add Comment"}
                 </Button>
               </div>
+            </div>
+          )}
+
+          {/* Activity (audit trail) - Only for existing cards */}
+          {cardId && (
+            <div className="space-y-2 pt-2 border-t border-border">
+              <button
+                type="button"
+                onClick={toggleActivity}
+                className="flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary"
+                aria-expanded={showActivity}
+              >
+                <History className="h-4 w-4" />
+                {showActivity ? "Hide activity" : "Show activity"}
+              </button>
+              {showActivity && (
+                loadingActivity ? (
+                  <p className="text-sm text-muted-foreground">Loading activity...</p>
+                ) : activity.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No activity recorded yet</p>
+                ) : (
+                  <ol className="space-y-2 max-h-48 overflow-y-auto border-l-2 border-border pl-3">
+                    {activity.map((entry) => (
+                      <li key={entry.id} className="text-xs">
+                        <span className="text-foreground">{entry.summary}</span>
+                        <span className="block text-muted-foreground">
+                          {entry.actorEmail ?? "system"} · {formatDate(entry.createdAt)}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )
+              )}
             </div>
           )}
 

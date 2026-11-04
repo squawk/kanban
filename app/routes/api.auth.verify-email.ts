@@ -16,7 +16,7 @@ export async function action({ request }: { request: Request }) {
     }
 
     // Verify the token
-    const result = verifyEmailToken(token);
+    const result = await verifyEmailToken(token);
     if (!result) {
       return new Response(
         JSON.stringify({ error: "Invalid or expired verification token" }),
@@ -25,10 +25,10 @@ export async function action({ request }: { request: Request }) {
     }
 
     // Mark email as verified
-    setEmailVerified(result.userId, true);
+    await setEmailVerified(result.userId, true);
 
     // Get user to check approval status
-    const user = getFullUser(result.userId);
+    const user = await getFullUser(result.userId);
 
     return new Response(
       JSON.stringify({

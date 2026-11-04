@@ -1,0 +1,44 @@
+# Deploys to Cloudflare Workers (https://kanban.skyhawklabs.dev) on every push to main.
+#
+# Repository secrets:
+#   CLOUDFLARE_API_TOKEN   - token with "Edit Cloudflare Workers" permissions
+#   CLOUDFLARE_ACCOUNT_ID  - your Cloudflare account id
+# Repository variable (Settings → Variables), compiled into the client bundle:
+#   VITE_RECAPTCHA_SITE_KEY - (optional) reCAPTCHA site key for the sign-up form
+#
+# Secrets (continued):
+#   DATABASE_URL           - (optional) Supabase *Session pooler* connection string; when
+#                            set, pending migrations are applied before deploying.
+#                            (The direct connection is IPv6-only, which GitHub runners lack.)
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency: deploy-production
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck and test
+        run: |
+          npm run typecheck
+          npx vitest run app/lib
+      - name: Apply database migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "DATABASE_URL not set; skipping migrations."; exit 0; fi
+          npm run db:migrate
+      - name: Build and deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VITE_RECAPTCHA_SITE_KEY: ${{ vars.VITE_RECAPTCHA_SITE_KEY }}
+        run: npm run deploy

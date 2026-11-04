@@ -1,4 +1,9 @@
 import { findUserByEmail, verifyPassword, getSessionWithResponse } from "~/lib/auth";
+import { db } from "~/lib/db";
+import { users } from "~/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { logAudit } from "~/lib/audit.server";
+import { isBootstrapAdminEmail } from "~/lib/config";
 import { checkRateLimit, rateLimitResponse, getClientIP, isValidEmail, INPUT_LIMITS } from "~/lib/security";
 
 export async function action({ request }: { request: Request }) {
@@ -8,7 +13,7 @@ export async function action({ request }: { request: Request }) {
 
   // Rate limiting to prevent brute force attacks
   const clientIP = getClientIP(request);
-  const rateLimit = checkRateLimit(clientIP, "auth");
+  const rateLimit = await checkRateLimit(clientIP, "auth");
   if (!rateLimit.allowed) {
     return rateLimitResponse(rateLimit.retryAfter!);
   }
@@ -40,7 +45,7 @@ export async function action({ request }: { request: Request }) {
     }
 
     // Find user
-    const user = findUserByEmail(email);
+    const user = await findUserByEmail(email);
     if (!user) {
       return new Response(
         JSON.stringify({ error: "Invalid email or password" }),
@@ -51,9 +56,33 @@ export async function action({ request }: { request: Request }) {
     // Verify password
     const isValid = await verifyPassword(password, user.passwordHash);
     if (!isValid) {
+      await logAudit({
+        actor: { id: user.id, email: user.email },
+        action: "auth.login_failed",
+        entityType: "auth",
+        entityId: user.id,
+        summary: `Failed sign-in for ${user.email}`,
+        request,
+      });
       return new Response(
         JSON.stringify({ error: "Invalid email or password" }),
         { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Disabled accounts cannot sign in (same message as bad credentials to avoid enumeration)
+    if (user.disabled) {
+      await logAudit({
+        actor: { id: user.id, email: user.email },
+        action: "auth.login_blocked",
+        entityType: "auth",
+        entityId: user.id,
+        summary: `Sign-in blocked for disabled account ${user.email}`,
+        request,
+      });
+      return new Response(
+        JSON.stringify({ error: "This account has been disabled. Contact an administrator." , code: "ACCOUNT_DISABLED" }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
       );
     }
 
@@ -79,9 +108,25 @@ export async function action({ request }: { request: Request }) {
       );
     }
 
+    // Promote ADMIN_EMAIL addresses that signed up before being configured as admins
+    const promote = isBootstrapAdminEmail(user.email) && user.role !== "admin";
+    await db
+      .update(users)
+      .set({ lastLoginAt: new Date(), ...(promote && { role: "admin" as const }) })
+      .where(eq(users.id, user.id));
+    if (promote) user.role = "admin";
+    await logAudit({
+      actor: { id: user.id, email: user.email },
+      action: "auth.login",
+      entityType: "auth",
+      entityId: user.id,
+      summary: `${user.email} signed in`,
+      request,
+    });
+
     // Create session
     const response = new Response(
-      JSON.stringify({ user: { id: user.id, email: user.email, name: user.name } }),
+      JSON.stringify({ user: { id: user.id, email: user.email, name: user.name, role: user.role } }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
 

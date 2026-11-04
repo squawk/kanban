@@ -7,6 +7,9 @@ afterEach(() => {
   cleanup();
 });
 
+// Server-side tests run in the "node" environment, which has no DOM to mock.
+const hasDom = typeof window !== "undefined";
+
 // Mock localStorage
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -25,18 +28,20 @@ const localStorageMock = (() => {
   };
 })();
 
-Object.defineProperty(window, "localStorage", {
-  value: localStorageMock,
-});
+if (hasDom) {
+  Object.defineProperty(window, "localStorage", {
+    value: localStorageMock,
+  });
 
-// Mock fetch for API tests
-global.fetch = vi.fn();
+  // Mock fetch for API tests
+  global.fetch = vi.fn();
 
-// Mock clipboard API
-Object.defineProperty(navigator, "clipboard", {
-  value: {
-    writeText: vi.fn(() => Promise.resolve()),
-  },
-  writable: true,
-  configurable: true,
-});
+  // Mock clipboard API
+  Object.defineProperty(navigator, "clipboard", {
+    value: {
+      writeText: vi.fn(() => Promise.resolve()),
+    },
+    writable: true,
+    configurable: true,
+  });
+}

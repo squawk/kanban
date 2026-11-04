@@ -3,7 +3,7 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { KanbanCard as KanbanCardType, KanbanColumn as KanbanColumnType } from "~/lib/types";
+import type { BoardMember, KanbanCard as KanbanCardType, KanbanColumn as KanbanColumnType } from "~/lib/types";
 import { KanbanCard } from "./KanbanCard";
 import { Button } from "./ui/button";
 
@@ -16,6 +16,8 @@ interface KanbanColumnProps {
   onGeneratePrompt: (card: KanbanCardType) => void;
   onDeleteColumn?: (columnId: string) => void;
   isDeletable?: boolean;
+  /** Other people who currently have a card open for editing (from Realtime presence) */
+  editorsByCard?: Map<string, BoardMember[]>;
 }
 
 export function KanbanColumn({
@@ -27,6 +29,7 @@ export function KanbanColumn({
   onGeneratePrompt,
   onDeleteColumn,
   isDeletable = false,
+  editorsByCard,
 }: KanbanColumnProps) {
   const { setNodeRef } = useDroppable({
     id: column.id,
@@ -82,6 +85,7 @@ export function KanbanColumn({
               <KanbanCard
                 key={card.id}
                 card={card}
+                editors={editorsByCard?.get(card.id)}
                 onEdit={onEditCard}
                 onDelete={onDeleteCard}
                 onGeneratePrompt={onGeneratePrompt}

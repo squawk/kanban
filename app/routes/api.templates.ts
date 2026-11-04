@@ -1,21 +1,21 @@
-import { db } from "~/lib/db";
+import { db, firstRow } from "~/lib/db";
 import { templates } from "~/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
-import { getSession } from "~/lib/auth";
+import { getSession, isActiveUser } from "~/lib/auth";
 import { nanoid } from "nanoid";
 
 // GET /api/templates - Get all templates
 export async function loader({ request }: { request: Request }) {
   try {
     const session = await getSession(request);
-    if (!session.userId) {
+    if (!session.userId || !await isActiveUser(session.userId)) {
       return new Response(
         JSON.stringify({ error: "Unauthorized" }),
         { status: 401, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    const allTemplates = db.select().from(templates).orderBy(asc(templates.name)).all();
+    const allTemplates = await db.select().from(templates).orderBy(asc(templates.name));
 
     // Transform JSON fields
     const transformedTemplates = allTemplates.map((template) => ({
@@ -45,7 +45,7 @@ export async function action({ request }: { request: Request }) {
 
   try {
     const session = await getSession(request);
-    if (!session.userId) {
+    if (!session.userId || !await isActiveUser(session.userId)) {
       return new Response(
         JSON.stringify({ error: "Unauthorized" }),
         { status: 401, headers: { "Content-Type": "application/json" } }
@@ -64,7 +64,7 @@ export async function action({ request }: { request: Request }) {
     const templateId = nanoid();
     const now = new Date();
 
-    db.insert(templates).values({
+    await db.insert(templates).values({
       id: templateId,
       name,
       title,
@@ -73,9 +73,9 @@ export async function action({ request }: { request: Request }) {
       priority: priority || "medium",
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
-    const newTemplate = db.select().from(templates).where(eq(templates.id, templateId)).get();
+    const newTemplate = await db.select().from(templates).where(eq(templates.id, templateId)).limit(1).then(firstRow);
 
     return new Response(
       JSON.stringify({

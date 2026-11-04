@@ -1,0 +1,16 @@
+# Local secrets for `npm run dev` / `npm run preview` (copy to .dev.vars).
+# In production set these with `npx wrangler secret put <NAME>`.
+NODE_ENV=development
+SESSION_SECRET=replace_with_at_least_32_random_characters
+SENDGRID_API_KEY=
+FROM_EMAIL=noreply@skyhawklabs.dev
+OPENAI_API_KEY=
+RECAPTCHA_SECRET_KEY=
+CRON_SECRET=
+APP_URL=http://localhost:5173
+# Live board updates (optional). SUPABASE_URL/SUPABASE_PUBLISHABLE_KEY may also go in wrangler.jsonc vars.
+SUPABASE_URL=
+SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
+# ES256 private JWK from scripts/gen-realtime-key.ts (enables private channels)
+SUPABASE_JWT_PRIVATE_KEY=

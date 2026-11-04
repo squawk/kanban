@@ -17,7 +17,7 @@ export async function action({ request }: { request: Request }) {
     }
 
     // Find user by email
-    const user = findUserByEmail(email);
+    const user = await findUserByEmail(email);
 
     // Always return success to prevent email enumeration
     if (!user) {
@@ -30,7 +30,7 @@ export async function action({ request }: { request: Request }) {
     }
 
     // Create reset token and send email
-    const resetToken = createPasswordResetToken(user.id);
+    const resetToken = await createPasswordResetToken(user.id);
     await sendPasswordResetEmail(email, user.name, resetToken);
 
     return new Response(

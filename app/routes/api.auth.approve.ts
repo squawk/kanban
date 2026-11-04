@@ -6,11 +6,13 @@ import {
   deleteUser,
 } from "~/lib/auth";
 import { sendApprovalNotificationEmail } from "~/lib/email";
+import { logAudit } from "~/lib/audit.server";
 
-const ADMIN_SECRET = process.env.ADMIN_APPROVAL_SECRET || process.env.SESSION_SECRET;
+const getAdminSecret = () => process.env.ADMIN_APPROVAL_SECRET || process.env.SESSION_SECRET;
 
 // Generate HMAC token for approval URL
 export function generateApprovalToken(userId: string, action: string): string {
+  const ADMIN_SECRET = getAdminSecret();
   if (!ADMIN_SECRET) {
     throw new Error("ADMIN_APPROVAL_SECRET or SESSION_SECRET must be configured");
   }
@@ -20,7 +22,7 @@ export function generateApprovalToken(userId: string, action: string): string {
 
 // Verify HMAC token
 function verifyApprovalToken(userId: string, action: string, token: string): boolean {
-  if (!ADMIN_SECRET) return false;
+  if (!getAdminSecret()) return false;
   const expectedToken = generateApprovalToken(userId, action);
   // Use timing-safe comparison to prevent timing attacks
   try {
@@ -70,7 +72,7 @@ export async function loader({ request }: { request: Request }) {
   }
 
   try {
-    const user = getFullUser(userId);
+    const user = await getFullUser(userId);
     if (!user) {
       return new Response(
         generateHtmlResponse("Error", "User not found.", false),
@@ -88,10 +90,19 @@ export async function loader({ request }: { request: Request }) {
 
     if (action === "approve") {
       // Approve the user
-      setUserApproved(userId, true);
+      await setUserApproved(userId, true);
 
       // Create their board now that they're approved
-      createUserBoard(userId);
+      await createUserBoard(userId);
+
+      await logAudit({
+        action: "user.approved",
+        entityType: "user",
+        entityId: userId,
+        summary: `${user.email} approved via email link`,
+        metadata: { via: "email_link" },
+        request,
+      });
 
       // Send notification email
       await sendApprovalNotificationEmail(user.email, user.name, true);
@@ -109,7 +120,16 @@ export async function loader({ request }: { request: Request }) {
       await sendApprovalNotificationEmail(user.email, user.name, false);
 
       // Delete the user
-      deleteUser(userId);
+      await deleteUser(userId);
+
+      await logAudit({
+        action: "user.rejected",
+        entityType: "user",
+        entityId: userId,
+        summary: `${user.email} rejected via email link (account removed)`,
+        metadata: { via: "email_link", email: user.email },
+        request,
+      });
 
       return new Response(
         generateHtmlResponse(

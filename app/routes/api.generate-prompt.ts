@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { Route } from "./+types/api.generate-prompt";
-import { getSession } from "~/lib/auth";
+import { getSession, isActiveUser } from "~/lib/auth";
 import { checkRateLimit, rateLimitResponse, INPUT_LIMITS } from "~/lib/security";
 
 export async function action({ request }: Route.ActionArgs) {
@@ -11,7 +11,7 @@ export async function action({ request }: Route.ActionArgs) {
   try {
     // SECURITY FIX: Require authentication to prevent unauthorized API abuse
     const session = await getSession(request);
-    if (!session.userId) {
+    if (!session.userId || !await isActiveUser(session.userId)) {
       return new Response(
         JSON.stringify({ error: "Unauthorized" }),
         { status: 401, headers: { "Content-Type": "application/json" } }
@@ -19,7 +19,7 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     // Rate limiting to prevent OpenAI API cost abuse
-    const rateLimit = checkRateLimit(session.userId, "openai");
+    const rateLimit = await checkRateLimit(session.userId, "openai");
     if (!rateLimit.allowed) {
       return rateLimitResponse(rateLimit.retryAfter!);
     }

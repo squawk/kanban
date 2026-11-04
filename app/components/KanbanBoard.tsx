@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -16,17 +16,54 @@ import { CardDialog } from "./CardDialog";
 import { ColumnDialog } from "./ColumnDialog";
 import { PromptDialog } from "./PromptDialog";
 import { ArchivedCardsDialog } from "./ArchivedCardsDialog";
+import { BoardMembersDialog } from "./BoardMembersDialog";
+import { UserAvatar } from "./UserAvatar";
 import { Button } from "./ui/button";
-import { Archive } from "lucide-react";
-import {
+import { Archive, Users } from "lucide-react";
+import type {
   KanbanCard as KanbanCardType,
-  KanbanColumn as KanbanColumnType,
   KanbanBoard as KanbanBoardType,
+  BoardMember,
+  CurrentUser,
 } from "~/lib/types";
 import { apiFetch } from "~/lib/api";
+import {
+  subscribeToBoard,
+  type BoardSubscription,
+  type BoardViewer,
+  type RealtimeStatus,
+} from "~/lib/realtime-client";
 
-export function KanbanBoard() {
+type AssigneeFilter = "all" | "mine" | "unassigned";
+
+/** Polling for shared boards: frequent without Realtime, a slow safety net with it */
+const REFRESH_INTERVAL_MS = 30_000;
+const LIVE_REFRESH_INTERVAL_MS = 5 * 60_000;
+
+interface KanbanBoardProps {
+  /** Board to show; defaults to the current user's own board */
+  boardId?: string | null;
+  currentUser?: CurrentUser;
+  /** Card to open on load (e.g. from an email link) */
+  openCardId?: string | null;
+  onOpenCardHandled?: () => void;
+  /** Called when the user leaves a shared board */
+  onLeftBoard?: () => void;
+  /** Called after the board loads (name, role) */
+  onBoardLoaded?: (info: { id: string; name: string; role: "owner" | "member" }) => void;
+}
+
+export function KanbanBoard({
+  boardId,
+  currentUser,
+  openCardId,
+  onOpenCardHandled,
+  onLeftBoard,
+  onBoardLoaded,
+}: KanbanBoardProps = {}) {
   const [board, setBoard] = useState<KanbanBoardType>({ columns: [], cards: {} });
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("all");
+  const [isMembersDialogOpen, setIsMembersDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeCard, setActiveCard] = useState<KanbanCardType | null>(null);
   const [isCardDialogOpen, setIsCardDialogOpen] = useState(false);
@@ -52,15 +89,129 @@ export function KanbanBoard() {
     })
   );
 
-  // Load board from database on mount
+  const boardQuery = boardId ? `?boardId=${encodeURIComponent(boardId)}` : "";
+  const resolvedBoardId = board.board?.id ?? boardId ?? undefined;
+  const isOwner = !board.board || board.board.role === "owner";
+  const members: BoardMember[] = board.members ?? [];
+  const isShared = members.length > 1;
+
+  // Load board from database on mount / when switching boards
   useEffect(() => {
+    setLoading(true);
+    setAssigneeFilter("all");
     fetchBoard();
     fetchArchivedCount();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId]);
+
+  // Open a specific card once the board has loaded (deep link from email)
+  useEffect(() => {
+    if (!openCardId || loading) return;
+    const card = board.cards[openCardId];
+    if (card) handleEditCard(card);
+    onOpenCardHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openCardId, loading]);
+
+  // Keep shared boards fresh. Refreshes wait while something is being edited or
+  // dragged (so a collaborator's change never yanks a dialog or drag out from under you)
+  // and run as soon as you're done.
+  const isBusy = isCardDialogOpen || isColumnDialogOpen || isArchivedDialogOpen || isMembersDialogOpen || !!activeCard;
+  const busyRef = useRef(false);
+  busyRef.current = isBusy;
+  const pendingRefreshRef = useRef(false);
+  const debounceRef = useRef<number | undefined>(undefined);
+  const [liveStatus, setLiveStatus] = useState<RealtimeStatus | null>(null);
+  const [viewers, setViewers] = useState<BoardViewer[]>([]);
+  const subscriptionRef = useRef<BoardSubscription | null>(null);
+
+  const refresh = useCallback(() => {
+    if (busyRef.current || document.visibilityState !== "visible") {
+      pendingRefreshRef.current = true;
+      return;
+    }
+    pendingRefreshRef.current = false;
+    window.clearTimeout(debounceRef.current);
+    // Coalesce bursts (e.g. a drag that moves several cards) into one fetch
+    debounceRef.current = window.setTimeout(() => {
+      fetchBoard();
+      fetchArchivedCount();
+    }, 250);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId]);
+
+  useEffect(() => {
+    if (!isBusy && pendingRefreshRef.current) refresh();
+  }, [isBusy, refresh]);
+
+  // Live updates over Supabase Realtime for shared boards
+  const realtimeTopic = isShared ? board.realtime?.topic : undefined;
+  useEffect(() => {
+    if (!realtimeTopic || !board.realtime || !board.board || !currentUser) {
+      setLiveStatus(null);
+      setViewers([]);
+      return;
+    }
+    const subscription = subscribeToBoard({
+      boardId: board.board.id,
+      userId: currentUser.id,
+      info: board.realtime,
+      onChange: refresh,
+      onStatus: setLiveStatus,
+      onPresence: setViewers,
+    });
+    subscriptionRef.current = subscription;
+    return () => {
+      subscriptionRef.current = null;
+      subscription.unsubscribe();
+      setViewers([]);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realtimeTopic, refresh, currentUser?.id]);
+
+  // Presence: let others see which card you have open
+  const editingCardIdForPresence = isCardDialogOpen && editingCard ? editingCard.id : null;
+  useEffect(() => {
+    subscriptionRef.current?.setEditing(editingCardIdForPresence);
+  }, [editingCardIdForPresence, liveStatus]);
+
+  // Only trust presence from current board members (it's client-reported)
+  const memberById = new Map(members.map((m) => [m.id, m]));
+  const viewerIds = new Set(viewers.filter((v) => memberById.has(v.userId)).map((v) => v.userId));
+  const editorsByCard = new Map<string, BoardMember[]>();
+  for (const v of viewers) {
+    const member = memberById.get(v.userId);
+    if (!member || !v.editingCardId || v.userId === currentUser?.id) continue;
+    editorsByCard.set(v.editingCardId, [...(editorsByCard.get(v.editingCardId) ?? []), member]);
+  }
+  const otherViewerCount = [...viewerIds].filter((id) => id !== currentUser?.id).length;
+
+  useEffect(() => {
+    if (!isShared) return;
+    const interval = liveStatus === "live" ? LIVE_REFRESH_INTERVAL_MS : REFRESH_INTERVAL_MS;
+    const id = window.setInterval(refresh, interval);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [isShared, liveStatus, refresh]);
+
+  const saveColumns = (newColumns: KanbanBoardType["columns"]) =>
+    apiFetch("/api/board", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        resolvedBoardId ? { boardId: resolvedBoardId, columns: newColumns } : { columns: newColumns }
+      ),
+    });
 
   const fetchArchivedCount = async () => {
     try {
-      const response = await apiFetch("/api/archived-cards");
+      const response = await apiFetch(`/api/archived-cards${boardQuery}`);
       if (response.ok) {
         const data = await response.json();
         setArchivedCount(data.length);
@@ -72,10 +223,14 @@ export function KanbanBoard() {
 
   const fetchBoard = async () => {
     try {
-      const response = await apiFetch("/api/board");
+      const response = await apiFetch(`/api/board${boardQuery}`);
       if (response.ok) {
         const data = await response.json();
         setBoard(data);
+        if (data.board) onBoardLoaded?.(data.board);
+      } else if (response.status === 404 && boardId) {
+        // Removed from this shared board (or it was deleted): go back to your own board
+        onLeftBoard?.();
       } else {
         console.error("Failed to fetch board");
       }
@@ -134,11 +289,7 @@ export function KanbanBoard() {
         }));
 
         // Save to database
-        await apiFetch("/api/board", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ columns: newColumns }),
-        });
+        await saveColumns(newColumns);
       }
     } else {
       // Moving to a different column
@@ -167,11 +318,7 @@ export function KanbanBoard() {
       }));
 
       // Save to database
-      await apiFetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ columns: newColumns }),
-      });
+      await saveColumns(newColumns);
 
       // Trigger confetti if card is moved to completed column (check by title)
       console.log(`Move detected: from "${activeColumn.title}" to "${overColumn.title}"`);
@@ -234,11 +381,7 @@ export function KanbanBoard() {
     setTargetColumnId(newColumnId);
 
     // Save to database
-    await apiFetch("/api/board", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columns: newColumns }),
-    });
+    await saveColumns(newColumns);
 
     // Trigger confetti if card is moved to completed column
     if (destColumn.title.toLowerCase() === "completed" && sourceColumn.title.toLowerCase() !== "completed") {
@@ -257,6 +400,7 @@ export function KanbanBoard() {
     dueDate?: string;
     priority: 'low' | 'medium' | 'high';
     tagIds: string[];
+    assigneeId?: string | null;
   }) => {
     if (editingCard) {
       // Update existing card
@@ -270,6 +414,7 @@ export function KanbanBoard() {
             dueDate: data.dueDate,
             priority: data.priority,
             tagIds: data.tagIds,
+            ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId }),
           }),
         });
 
@@ -293,6 +438,7 @@ export function KanbanBoard() {
             priority: data.priority,
             tagIds: data.tagIds,
             columnId: targetColumnId,
+            ...(data.assigneeId && { assigneeId: data.assigneeId }),
           }),
         });
 
@@ -359,7 +505,7 @@ export function KanbanBoard() {
       const response = await apiFetch("/api/columns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify(resolvedBoardId ? { title, boardId: resolvedBoardId } : { title }),
       });
 
       if (response.ok) {
@@ -478,13 +624,96 @@ export function KanbanBoard() {
   return (
     <div className="flex-1">
       <div className="container mx-auto px-4 py-6">
-        <div className="flex items-center justify-between mb-4 sm:mb-6">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 sm:mb-6">
+          <div className="min-w-0">
+            {board.board && (
+              <h2 className="text-lg font-semibold text-foreground truncate" data-testid="board-name">
+                {board.board.name}
+                {!isOwner && (
+                  <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">shared with you</span>
+                )}
+                {liveStatus === "live" && (
+                  <span
+                    className="ml-2 inline-flex items-center gap-1 align-middle text-xs font-normal text-muted-foreground"
+                    title="Changes from other people appear automatically"
+                    data-testid="live-indicator"
+                  >
+                    <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" aria-hidden="true" />
+                    Live
+                  </span>
+                )}
+              </h2>
+            )}
             <p className="hidden sm:block text-muted-foreground">
               Organize your projects with style
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {members.length > 0 && (
+              <div className="flex items-center gap-2">
+                {isShared && (
+                  <div
+                    className="hidden sm:flex items-center -space-x-2"
+                    aria-label={
+                      liveStatus === "live"
+                        ? `Board members, ${otherViewerCount} other${otherViewerCount === 1 ? "" : "s"} viewing now`
+                        : "Board members"
+                    }
+                    data-testid="member-stack"
+                  >
+                    {/* People viewing right now first, then everyone else dimmed */}
+                    {[...members]
+                      .sort((a, b) => Number(viewerIds.has(b.id)) - Number(viewerIds.has(a.id)))
+                      .slice(0, 5)
+                      .map((m) => {
+                        const viewing = viewerIds.has(m.id);
+                        return (
+                          <span
+                            key={m.id}
+                            className={`relative ${liveStatus === "live" && !viewing ? "opacity-40" : ""}`}
+                            title={
+                              liveStatus !== "live"
+                                ? m.name
+                                : viewing
+                                  ? `${m.name}${m.id === currentUser?.id ? " (you)" : ""} · viewing now`
+                                  : `${m.name} · not here`
+                            }
+                            data-testid={viewing ? "viewer-present" : undefined}
+                            data-user-id={m.id}
+                          >
+                            <UserAvatar user={m} />
+                            {liveStatus === "live" && viewing && (
+                              <span
+                                className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-card"
+                                aria-hidden="true"
+                              />
+                            )}
+                          </span>
+                        );
+                      })}
+                    {members.length > 5 && (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] ring-2 ring-card">
+                        +{members.length - 5}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <select
+                  aria-label="Filter by assignee"
+                  value={assigneeFilter}
+                  onChange={(e) => setAssigneeFilter(e.target.value as AssigneeFilter)}
+                  className="h-9 px-2 border-2 border-border rounded-md bg-card text-foreground text-sm"
+                >
+                  <option value="all">All cards</option>
+                  <option value="mine">Assigned to me</option>
+                  <option value="unassigned">Unassigned</option>
+                </select>
+                <Button variant="outline" onClick={() => setIsMembersDialogOpen(true)}>
+                  <Users className="h-4 w-4 mr-2" />
+                  {isOwner ? "Share" : "Members"}
+                </Button>
+              </div>
+            )}
             <Button
               variant="outline"
               onClick={() => setIsArchivedDialogOpen(true)}
@@ -532,13 +761,21 @@ export function KanbanBoard() {
                 column={column}
                 cards={column.cardIds
                   .map((id) => board.cards[id])
-                  .filter(Boolean)}
+                  .filter(Boolean)
+                  .filter((card) =>
+                    assigneeFilter === "all"
+                      ? true
+                      : assigneeFilter === "mine"
+                        ? card.assigneeId === currentUser?.id
+                        : !card.assigneeId
+                  )}
+                editorsByCard={editorsByCard}
                 onAddCard={handleAddCard}
                 onEditCard={handleEditCard}
                 onDeleteCard={handleDeleteCard}
                 onGeneratePrompt={handleGeneratePrompt}
                 onDeleteColumn={handleDeleteColumn}
-                isDeletable={!defaultColumnTitles.includes(column.title.toLowerCase())}
+                isDeletable={isOwner && !defaultColumnTitles.includes(column.title.toLowerCase())}
               />
             ))}
           </div>
@@ -567,6 +804,9 @@ export function KanbanBoard() {
         columns={board.columns}
         currentColumnId={targetColumnId || undefined}
         onColumnChange={handleColumnChange}
+        members={board.members}
+        currentUserId={currentUser?.id}
+        otherEditors={editingCard ? editorsByCard.get(editingCard.id) : undefined}
       />
 
       <ColumnDialog
@@ -587,11 +827,30 @@ export function KanbanBoard() {
         open={isArchivedDialogOpen}
         onOpenChange={setIsArchivedDialogOpen}
         columns={board.columns}
+        boardId={resolvedBoardId}
+        canDelete={isOwner}
         onCardRestored={() => {
           fetchBoard();
           fetchArchivedCount();
         }}
       />
+
+      {board.board && currentUser && (
+        <BoardMembersDialog
+          open={isMembersDialogOpen}
+          onOpenChange={setIsMembersDialogOpen}
+          boardId={board.board.id}
+          boardName={board.board.name}
+          isOwner={isOwner}
+          currentUserId={currentUser.id}
+          members={members}
+          onMembersChange={(next) => {
+            setBoard((prev) => ({ ...prev, members: next }));
+            fetchBoard();
+          }}
+          onLeft={onLeftBoard}
+        />
+      )}
     </div>
   );
 }
