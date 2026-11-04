@@ -34,7 +34,7 @@
 
   // Non-secret configuration. Secrets (SESSION_SECRET, SENDGRID_API_KEY, FROM_EMAIL,
   // OPENAI_API_KEY, RECAPTCHA_SECRET_KEY, CRON_SECRET, ADMIN_APPROVAL_SECRET,
-  // SUPABASE_SECRET_KEY, optional REALTIME_TOPIC_SECRET) are set with
+  // SUPABASE_SECRET_KEY, SUPABASE_JWT_PRIVATE_KEY, optional REALTIME_TOPIC_SECRET) are set with
   // `wrangler secret put <NAME>`. FROM_EMAIL must be a verified SendGrid sender.
   "vars": {
     "NODE_ENV": "production",

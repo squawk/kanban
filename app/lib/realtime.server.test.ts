@@ -1,7 +1,22 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runWithContext, type Database } from "./db";
-import { boardTopic, broadcastBoardChanged, clientRealtimeConfig, flushBroadcasts } from "./realtime.server";
+import crypto from "crypto";
+import {
+  boardTopic,
+  broadcastBoardChanged,
+  clientRealtimeConfig,
+  flushBroadcasts,
+  REALTIME_TOKEN_TTL_SECONDS,
+  signRealtimeToken,
+} from "./realtime.server";
+
+function makeKey() {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const jwk = { ...(privateKey.export({ format: "jwk" }) as object), kid: "test-kid" };
+  return { jwk: JSON.stringify(jwk), publicKey };
+}
+const decode = (part: string) => JSON.parse(Buffer.from(part, "base64url").toString());
 
 const fetchMock = vi.fn(async () => new Response("", { status: 202 }));
 
@@ -20,7 +35,7 @@ describe("realtime broadcasts", () => {
   });
   afterEach(() => {
     vi.unstubAllGlobals();
-    for (const k of ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "REALTIME_TOPIC_SECRET"]) delete process.env[k];
+    for (const k of ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "REALTIME_TOPIC_SECRET", "SUPABASE_JWT_PRIVATE_KEY"]) delete process.env[k];
   });
 
   it("derives a stable, unguessable topic per board", () => {
@@ -35,7 +50,7 @@ describe("realtime broadcasts", () => {
 
   it("gives the browser only the public key", () => {
     const cfg = clientRealtimeConfig("board-1")!;
-    expect(cfg).toEqual({ url: "https://abc.supabase.co", key: "sb_publishable_123", topic: boardTopic("board-1") });
+    expect(cfg).toEqual({ url: "https://abc.supabase.co", key: "sb_publishable_123", topic: boardTopic("board-1"), private: false });
     expect(JSON.stringify(cfg)).not.toContain("sb_secret");
   });
 
@@ -76,5 +91,46 @@ describe("realtime broadcasts", () => {
     await flushBroadcasts();
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  describe("private channels", () => {
+    it("signs an ES256 JWT that verifies with the public key and is scoped to one board", async () => {
+      const { jwk, publicKey } = makeKey();
+      process.env.SUPABASE_JWT_PRIVATE_KEY = jwk;
+      const now = Date.UTC(2026, 10, 4, 12, 0, 0);
+      const { token, expiresAt } = await signRealtimeToken("user-1", "board-1", now);
+
+      const [h, p, sig] = token.split(".");
+      expect(decode(h)).toEqual({ alg: "ES256", typ: "JWT", kid: "test-kid" });
+      const claims = decode(p);
+      expect(claims).toMatchObject({ role: "authenticated", aud: "authenticated", sub: "user-1", kanban_topic: boardTopic("board-1") });
+      expect(claims.exp - claims.iat).toBe(REALTIME_TOKEN_TTL_SECONDS);
+      expect(expiresAt).toBe(claims.exp * 1000);
+
+      const valid = crypto.verify(
+        "sha256",
+        Buffer.from(`${h}.${p}`),
+        { key: publicKey, dsaEncoding: "ieee-p1363" },
+        Buffer.from(sig, "base64url")
+      );
+      expect(valid).toBe(true);
+    });
+
+    it("rejects keys that aren't P-256 private JWKs with a kid", async () => {
+      process.env.SUPABASE_JWT_PRIVATE_KEY = JSON.stringify({ kty: "RSA", n: "x", e: "AQAB" });
+      await expect(signRealtimeToken("u", "b")).rejects.toThrow(/P-256/);
+      const { privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+      process.env.SUPABASE_JWT_PRIVATE_KEY = JSON.stringify(privateKey.export({ format: "jwk" }));
+      await expect(signRealtimeToken("u", "b")).rejects.toThrow(/kid/);
+    });
+
+    it("marks the channel private for browsers and broadcasts privately", async () => {
+      process.env.SUPABASE_JWT_PRIVATE_KEY = makeKey().jwk;
+      expect(clientRealtimeConfig("board-1")?.private).toBe(true);
+      broadcastBoardChanged("board-1");
+      await flushBroadcasts();
+      const [url] = fetchMock.mock.calls[0] as unknown as [string];
+      expect(url).toMatch(/\/events\/changed\?private=true$/);
+    });
   });
 });

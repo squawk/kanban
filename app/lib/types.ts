@@ -91,7 +91,7 @@ export interface KanbanColumn {
 export interface KanbanBoard {
   board?: BoardInfo;
   /** Supabase Realtime channel for live updates (null when not configured) */
-  realtime?: { url: string; key: string; topic: string } | null;
+  realtime?: { url: string; key: string; topic: string; private?: boolean } | null;
   members?: BoardMember[];
   columns: KanbanColumn[];
   cards: Record<string, KanbanCard>;

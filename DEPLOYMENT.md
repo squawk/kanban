@@ -43,24 +43,42 @@ npx wrangler secret put OPENAI_API_KEY        # AI prompt generation
 npx wrangler secret put RECAPTCHA_SECRET_KEY  # optional
 npx wrangler secret put CRON_SECRET           # optional: enables POST /api/cron/due-reminders
 npx wrangler secret put SUPABASE_SECRET_KEY   # live updates: Supabase "secret" (or legacy service_role) key
+npx wrangler secret put SUPABASE_JWT_PRIVATE_KEY  # live updates, private channels (see below)
 ```
 Non-secret settings (`APP_URL`, `ADMIN_EMAIL`, `SIGNUP_MODE`, `REMINDER_TIMEZONE`, …) are in
 `wrangler.jsonc` → `vars`. The sign-up policy there is only a default: admins change it under
 **Admin → Sign-up**.
 
-### Live board updates (Supabase Realtime)
+### Live board updates (Supabase Realtime, private channels)
 1. In `wrangler.jsonc` → `vars`, set `SUPABASE_URL` (`https://<project-ref>.supabase.co`) and
    `SUPABASE_PUBLISHABLE_KEY` (the publishable/anon key). Both are public.
 2. Set the `SUPABASE_SECRET_KEY` secret (above).
-3. In Supabase, go to **Realtime → Settings** and keep **"Allow public access"** enabled.
+3. Create the token-signing key:
+   ```bash
+   npx tsx scripts/gen-realtime-key.ts
+   ```
+   In Supabase, go to **Project Settings → JWT Keys → Create standby key**, import the printed
+   private JWK, then **Rotate keys** so it's in use. This is safe because the app doesn't use
+   Supabase Auth. Then set the same JSON as a secret:
+   `npx wrangler secret put SUPABASE_JWT_PRIVATE_KEY`.
+4. Run migrations (`npm run db:migrate`). `0002` adds the RLS policy on `realtime.messages`.
+5. In Supabase, go to **Realtime → Settings** and turn **off "Allow public access"**, so only
+   private (authorized) channels work.
 
-How it works: after any board change, the Worker broadcasts a content-free "changed" signal
-to that board's channel, and open browsers refetch through the normal authenticated API. No
-board data goes through Realtime, and the tables stay locked by RLS. Channel names are an
-HMAC of the board id (keyed by `REALTIME_TOPIC_SECRET`, or `SESSION_SECRET` if that isn't set),
-so only people who can open a board learn its channel. Someone removed from a board who still
-remembers the channel name can only see *when* it changes, never what changed. If Realtime is
-unavailable, shared boards poll every 30 seconds instead.
+How it works:
+- After any board change, the Worker broadcasts a content-free "changed" signal to that
+  board's **private** channel, and open browsers refetch through the normal authenticated API.
+  No board data goes through Realtime.
+- To join, a browser asks `GET /api/realtime-token?boardId=…` for a JWT, which is only issued
+  if the user can open that board. The token is signed with the key above, valid for 10 minutes,
+  and scoped to that one channel by its `kanban_topic` claim. The RLS policy lets a token
+  receive on its own channel only. There's no send policy, so browsers can't broadcast.
+- Someone removed from a board stops getting signals when their token expires (within 10
+  minutes), and in practice immediately, because their next refetch is refused.
+- Channel names are an HMAC of the board id (keyed by `REALTIME_TOPIC_SECRET`, falling back to
+  `SESSION_SECRET`).
+- Without `SUPABASE_JWT_PRIVATE_KEY` the app falls back to public channels (leave "Allow public
+  access" on in that case). If Realtime is unavailable, shared boards poll every 30 seconds.
 
 If you send from `@skyhawklabs.dev`, complete SendGrid **domain authentication** and add its DNS
 records in the Cloudflare dashboard.

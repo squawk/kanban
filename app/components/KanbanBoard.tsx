@@ -140,11 +140,11 @@ export function KanbanBoard({
   // Live updates over Supabase Realtime for shared boards
   const realtimeTopic = isShared ? board.realtime?.topic : undefined;
   useEffect(() => {
-    if (!realtimeTopic || !board.realtime) {
+    if (!realtimeTopic || !board.realtime || !board.board) {
       setLiveStatus(null);
       return;
     }
-    return subscribeToBoard(board.realtime, refresh, setLiveStatus);
+    return subscribeToBoard(board.board.id, board.realtime, refresh, setLiveStatus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeTopic, refresh]);
 

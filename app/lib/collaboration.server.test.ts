@@ -4,7 +4,7 @@
  * assignment, audit trail and notifications. Runs the real route handlers
  * against a throwaway SQLite database.
  */
-import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 
 vi.hoisted(() => {
   process.env.SESSION_SECRET = "test_secret_that_is_at_least_32_characters_long";
@@ -57,11 +57,12 @@ import * as column from "~/routes/api.columns.$columnId";
 import * as myTasks from "~/routes/api.my-tasks";
 import * as cron from "~/routes/api.cron.due-reminders";
 import * as reminders from "~/lib/due-reminders.server";
+import * as realtimeToken from "~/routes/api.realtime-token";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const m: Record<string, any> = {
   auth, notifications, login: login_, register, acceptInvite, me, adminUsers, adminInvites, adminSettings,
-  adminAudit, board, boards, members, cards, card, comments, activity, column, myTasks, cron, reminders,
+  adminAudit, board, boards, members, cards, card, comments, activity, column, myTasks, cron, reminders, realtimeToken,
 };
 let ipCounter = 0;
 
@@ -543,5 +544,54 @@ describe("due-date reminders", () => {
     const res = await m.cron.action({ request: good });
     expect(res.status).toBe(200);
     expect(await body(res)).toHaveProperty("today");
+  });
+});
+
+describe("realtime tokens", () => {
+  let owner: { id: string; email: string };
+  let ownerCookie: string;
+  let outsiderCookie: string;
+  let boardId: string;
+
+  beforeAll(async () => {
+    owner = await createActiveUser("rt-owner@acme.com", "RT Owner");
+    const outsider = await createActiveUser("rt-outsider@acme.com", "RT Outsider");
+    ownerCookie = await login(owner.email);
+    outsiderCookie = await login(outsider.email);
+    boardId = (await body(await m.board.loader({ request: req("/api/board", { cookie: ownerCookie }) }))).board.id;
+  });
+
+  afterEach(() => {
+    for (const k of ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "SUPABASE_JWT_PRIVATE_KEY"]) delete process.env[k];
+  });
+
+  const tokenReq = (cookie?: string) =>
+    m.realtimeToken.loader({ request: req(`/api/realtime-token?boardId=${boardId}`, { cookie }) });
+
+  it("is disabled unless private channels are configured", async () => {
+    expect((await tokenReq(ownerCookie)).status).toBe(404);
+  });
+
+  it("issues a token only to people who can see the board", async () => {
+    const { privateKey } = await import("crypto").then((c) => c.generateKeyPairSync("ec", { namedCurve: "P-256" }));
+    Object.assign(process.env, {
+      SUPABASE_URL: "https://abc.supabase.co",
+      SUPABASE_PUBLISHABLE_KEY: "pk",
+      SUPABASE_SECRET_KEY: "sk",
+      SUPABASE_JWT_PRIVATE_KEY: JSON.stringify({ ...(privateKey.export({ format: "jwk" }) as object), kid: "k1" }),
+    });
+
+    expect((await tokenReq()).status).toBe(401);
+    expect((await tokenReq(outsiderCookie)).status).toBe(404);
+
+    const res = await tokenReq(ownerCookie);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const { token } = await body(res);
+    const claims = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
+    expect(claims.sub).toBe(owner.id);
+
+    const boardRes = await body(await m.board.loader({ request: req("/api/board", { cookie: ownerCookie }) }));
+    expect(boardRes.realtime).toMatchObject({ private: true, key: "pk", topic: claims.kanban_topic });
   });
 });
