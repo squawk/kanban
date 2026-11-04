@@ -32,6 +32,8 @@ interface CardDialogProps {
   /** People who can be assigned (board owner + members). Enables the assignee picker. */
   members?: BoardMember[];
   currentUserId?: string;
+  /** Other people with this card open right now (Realtime presence) */
+  otherEditors?: BoardMember[];
 }
 
 export function CardDialog({
@@ -45,6 +47,7 @@ export function CardDialog({
   onColumnChange,
   members,
   currentUserId,
+  otherEditors,
 }: CardDialogProps) {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -280,6 +283,24 @@ export function CardDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
+          {cardId && otherEditors && otherEditors.length > 0 && (
+            <div
+              className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300"
+              role="status"
+              data-testid="concurrent-editing-warning"
+            >
+              <span className="flex -space-x-1">
+                {otherEditors.slice(0, 3).map((e) => (
+                  <UserAvatar key={e.id} user={e} size="xs" />
+                ))}
+              </span>
+              <span>
+                {otherEditors.map((e) => e.name).join(", ")} {otherEditors.length === 1 ? "is" : "are"} also editing this
+                card. Whoever saves last wins.
+              </span>
+            </div>
+          )}
+
           {/* Title */}
           <div className="space-y-2">
             <label htmlFor="title" className="text-sm font-medium text-foreground">

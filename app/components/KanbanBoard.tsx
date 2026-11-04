@@ -27,7 +27,12 @@ import type {
   CurrentUser,
 } from "~/lib/types";
 import { apiFetch } from "~/lib/api";
-import { subscribeToBoard, type RealtimeStatus } from "~/lib/realtime-client";
+import {
+  subscribeToBoard,
+  type BoardSubscription,
+  type BoardViewer,
+  type RealtimeStatus,
+} from "~/lib/realtime-client";
 
 type AssigneeFilter = "all" | "mine" | "unassigned";
 
@@ -117,6 +122,8 @@ export function KanbanBoard({
   const pendingRefreshRef = useRef(false);
   const debounceRef = useRef<number | undefined>(undefined);
   const [liveStatus, setLiveStatus] = useState<RealtimeStatus | null>(null);
+  const [viewers, setViewers] = useState<BoardViewer[]>([]);
+  const subscriptionRef = useRef<BoardSubscription | null>(null);
 
   const refresh = useCallback(() => {
     if (busyRef.current || document.visibilityState !== "visible") {
@@ -140,13 +147,44 @@ export function KanbanBoard({
   // Live updates over Supabase Realtime for shared boards
   const realtimeTopic = isShared ? board.realtime?.topic : undefined;
   useEffect(() => {
-    if (!realtimeTopic || !board.realtime || !board.board) {
+    if (!realtimeTopic || !board.realtime || !board.board || !currentUser) {
       setLiveStatus(null);
+      setViewers([]);
       return;
     }
-    return subscribeToBoard(board.board.id, board.realtime, refresh, setLiveStatus);
+    const subscription = subscribeToBoard({
+      boardId: board.board.id,
+      userId: currentUser.id,
+      info: board.realtime,
+      onChange: refresh,
+      onStatus: setLiveStatus,
+      onPresence: setViewers,
+    });
+    subscriptionRef.current = subscription;
+    return () => {
+      subscriptionRef.current = null;
+      subscription.unsubscribe();
+      setViewers([]);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [realtimeTopic, refresh]);
+  }, [realtimeTopic, refresh, currentUser?.id]);
+
+  // Presence: let others see which card you have open
+  const editingCardIdForPresence = isCardDialogOpen && editingCard ? editingCard.id : null;
+  useEffect(() => {
+    subscriptionRef.current?.setEditing(editingCardIdForPresence);
+  }, [editingCardIdForPresence, liveStatus]);
+
+  // Only trust presence from current board members (it's client-reported)
+  const memberById = new Map(members.map((m) => [m.id, m]));
+  const viewerIds = new Set(viewers.filter((v) => memberById.has(v.userId)).map((v) => v.userId));
+  const editorsByCard = new Map<string, BoardMember[]>();
+  for (const v of viewers) {
+    const member = memberById.get(v.userId);
+    if (!member || !v.editingCardId || v.userId === currentUser?.id) continue;
+    editorsByCard.set(v.editingCardId, [...(editorsByCard.get(v.editingCardId) ?? []), member]);
+  }
+  const otherViewerCount = [...viewerIds].filter((id) => id !== currentUser?.id).length;
 
   useEffect(() => {
     if (!isShared) return;
@@ -614,10 +652,45 @@ export function KanbanBoard({
             {members.length > 0 && (
               <div className="flex items-center gap-2">
                 {isShared && (
-                  <div className="hidden sm:flex -space-x-2" aria-label="Board members">
-                    {members.slice(0, 5).map((m) => (
-                      <UserAvatar key={m.id} user={m} />
-                    ))}
+                  <div
+                    className="hidden sm:flex items-center -space-x-2"
+                    aria-label={
+                      liveStatus === "live"
+                        ? `Board members, ${otherViewerCount} other${otherViewerCount === 1 ? "" : "s"} viewing now`
+                        : "Board members"
+                    }
+                    data-testid="member-stack"
+                  >
+                    {/* People viewing right now first, then everyone else dimmed */}
+                    {[...members]
+                      .sort((a, b) => Number(viewerIds.has(b.id)) - Number(viewerIds.has(a.id)))
+                      .slice(0, 5)
+                      .map((m) => {
+                        const viewing = viewerIds.has(m.id);
+                        return (
+                          <span
+                            key={m.id}
+                            className={`relative ${liveStatus === "live" && !viewing ? "opacity-40" : ""}`}
+                            title={
+                              liveStatus !== "live"
+                                ? m.name
+                                : viewing
+                                  ? `${m.name}${m.id === currentUser?.id ? " (you)" : ""} · viewing now`
+                                  : `${m.name} · not here`
+                            }
+                            data-testid={viewing ? "viewer-present" : undefined}
+                            data-user-id={m.id}
+                          >
+                            <UserAvatar user={m} />
+                            {liveStatus === "live" && viewing && (
+                              <span
+                                className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-card"
+                                aria-hidden="true"
+                              />
+                            )}
+                          </span>
+                        );
+                      })}
                     {members.length > 5 && (
                       <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] ring-2 ring-card">
                         +{members.length - 5}
@@ -696,6 +769,7 @@ export function KanbanBoard({
                         ? card.assigneeId === currentUser?.id
                         : !card.assigneeId
                   )}
+                editorsByCard={editorsByCard}
                 onAddCard={handleAddCard}
                 onEditCard={handleEditCard}
                 onDeleteCard={handleDeleteCard}
@@ -732,6 +806,7 @@ export function KanbanBoard({
         onColumnChange={handleColumnChange}
         members={board.members}
         currentUserId={currentUser?.id}
+        otherEditors={editingCard ? editorsByCard.get(editingCard.id) : undefined}
       />
 
       <ColumnDialog

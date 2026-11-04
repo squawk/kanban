@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { KanbanCard as KanbanCardType } from "~/lib/types";
+import type { BoardMember, KanbanCard as KanbanCardType } from "~/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { MessageSquare, Calendar } from "lucide-react";
 import { UserAvatar } from "./UserAvatar";
@@ -10,9 +10,11 @@ interface KanbanCardProps {
   onEdit: (card: KanbanCardType) => void;
   onDelete: (cardId: string) => void;
   onGeneratePrompt: (card: KanbanCardType) => void;
+  /** Other people editing this card right now (Realtime presence) */
+  editors?: BoardMember[];
 }
 
-export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanCardProps) {
+export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, editors }: KanbanCardProps) {
   const {
     attributes,
     listeners,
@@ -149,6 +151,22 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
               </button>
             </div>
           </div>
+
+          {/* Someone else has this card open */}
+          {editors && editors.length > 0 && (
+            <div
+              className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
+              data-testid="card-editing"
+              title="They may save changes over yours; wait or coordinate before editing."
+            >
+              <span className="flex -space-x-1">
+                {editors.slice(0, 2).map((e) => (
+                  <UserAvatar key={e.id} user={e} size="xs" />
+                ))}
+              </span>
+              {editors.length === 1 ? `${editors[0].name.split(" ")[0]} is editing` : `${editors.length} people editing`}
+            </div>
+          )}
 
           {/* Tags */}
           {card.tags && card.tags.length > 0 && (

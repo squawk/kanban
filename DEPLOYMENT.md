@@ -61,7 +61,7 @@ Non-secret settings (`APP_URL`, `ADMIN_EMAIL`, `SIGNUP_MODE`, `REMINDER_TIMEZONE
    private JWK, then **Rotate keys** so it's in use. This is safe because the app doesn't use
    Supabase Auth. Then set the same JSON as a secret:
    `npx wrangler secret put SUPABASE_JWT_PRIVATE_KEY`.
-4. Run migrations (`npm run db:migrate`). `0002` adds the RLS policy on `realtime.messages`.
+4. Run migrations (`npm run db:migrate`). `0002` and `0003` add the RLS policies on `realtime.messages`.
 5. In Supabase, go to **Realtime → Settings** and turn **off "Allow public access"**, so only
    private (authorized) channels work.
 
@@ -71,8 +71,13 @@ How it works:
   No board data goes through Realtime.
 - To join, a browser asks `GET /api/realtime-token?boardId=…` for a JWT, which is only issued
   if the user can open that board. The token is signed with the key above, valid for 10 minutes,
-  and scoped to that one channel by its `kanban_topic` claim. The RLS policy lets a token
-  receive on its own channel only. There's no send policy, so browsers can't broadcast.
+  and scoped to that one channel by its `kanban_topic` claim. The RLS policies let a token
+  receive broadcasts and presence on its own channel only, and *publish presence* there (who's
+  viewing, which card is open). Browsers can't send broadcasts, so they can't fake "board
+  changed" signals.
+- Presence is reported by browsers, so the UI only shows people who are current members of the
+  board (from the authenticated API). A member could still misreport which card they have open;
+  it's an informational hint, not a lock.
 - Someone removed from a board stops getting signals when their token expires (within 10
   minutes), and in practice immediately, because their next refetch is refused.
 - Channel names are an HMAC of the board id (keyed by `REALTIME_TOPIC_SECRET`, falling back to
