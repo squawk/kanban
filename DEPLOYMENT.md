@@ -76,8 +76,8 @@ How it works:
   viewing, which card is open). Browsers can't send broadcasts, so they can't fake "board
   changed" signals.
 - Presence is reported by browsers, so the UI only shows people who are current members of the
-  board (from the authenticated API). A member could still misreport which card they have open;
-  it's an informational hint, not a lock.
+  board (from the authenticated API). Who is *editing* a card comes from server-side card locks
+  (`card_locks`, migration `0004`), not presence.
 - Someone removed from a board stops getting signals when their token expires (within 10
   minutes), and in practice immediately, because their next refetch is refused.
 - Channel names are an HMAC of the board id (keyed by `REALTIME_TOPIC_SECRET`, falling back to

@@ -1,6 +1,6 @@
-import { inArray } from "drizzle-orm";
+import { inArray, max } from "drizzle-orm";
 import { db } from "./db";
-import { cardTags, comments, tags, users, type Card } from "./db/schema";
+import { cardRevisions, cardTags, comments, tags, users, type Card } from "./db/schema";
 
 type UserLite = { id: string; name: string; email: string };
 
@@ -32,6 +32,16 @@ export async function serializeCards(cardRows: Card[], opts: { includeComments?:
     ...allComments.map((c) => c.authorId),
   ]);
 
+  // Latest history version per card: editors send it back so stale saves are refused
+  const versionRows = cardIds.length
+    ? await db
+        .select({ cardId: cardRevisions.cardId, v: max(cardRevisions.version) })
+        .from(cardRevisions)
+        .where(inArray(cardRevisions.cardId, cardIds))
+        .groupBy(cardRevisions.cardId)
+    : [];
+  const versionOf = new Map(versionRows.map((r) => [r.cardId, r.v ?? 0]));
+
   const commentsByCard = new Map<string, typeof allComments>();
   for (const c of allComments) {
     const list = commentsByCard.get(c.cardId) ?? [];
@@ -57,6 +67,7 @@ export async function serializeCards(cardRows: Card[], opts: { includeComments?:
       dueDate: card.dueDate ? card.dueDate.toISOString() : undefined,
       priority: card.priority,
       assigneeId: card.assigneeId ?? null,
+      version: versionOf.get(card.id) ?? 0,
       assignee,
       createdBy,
       comments: (commentsByCard.get(card.id) ?? [])

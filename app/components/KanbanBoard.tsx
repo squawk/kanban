@@ -19,14 +19,16 @@ import { ArchivedCardsDialog } from "./ArchivedCardsDialog";
 import { BoardMembersDialog } from "./BoardMembersDialog";
 import { UserAvatar } from "./UserAvatar";
 import { Button } from "./ui/button";
-import { Archive, Users } from "lucide-react";
+import { Archive, Undo2, Users, X } from "lucide-react";
 import type {
   KanbanCard as KanbanCardType,
   KanbanBoard as KanbanBoardType,
   BoardMember,
+  UserSummary,
   CurrentUser,
 } from "~/lib/types";
 import { apiFetch } from "~/lib/api";
+import { useCardLock } from "~/lib/use-card-lock";
 import {
   subscribeToBoard,
   type BoardSubscription,
@@ -125,7 +127,10 @@ export function KanbanBoard({
   const [viewers, setViewers] = useState<BoardViewer[]>([]);
   const subscriptionRef = useRef<BoardSubscription | null>(null);
 
+  const lockRecheckRef = useRef<(() => void) | null>(null);
   const refresh = useCallback(() => {
+    // A lock may have been released or taken over: re-check the open card's lock right away
+    lockRecheckRef.current?.();
     if (busyRef.current || document.visibilityState !== "visible") {
       pendingRefreshRef.current = true;
       return;
@@ -169,22 +174,113 @@ export function KanbanBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeTopic, refresh, currentUser?.id]);
 
-  // Presence: let others see which card you have open
-  const editingCardIdForPresence = isCardDialogOpen && editingCard ? editingCard.id : null;
-  useEffect(() => {
-    subscriptionRef.current?.setEditing(editingCardIdForPresence);
-  }, [editingCardIdForPresence, liveStatus]);
-
   // Only trust presence from current board members (it's client-reported)
   const memberById = new Map(members.map((m) => [m.id, m]));
   const viewerIds = new Set(viewers.filter((v) => memberById.has(v.userId)).map((v) => v.userId));
-  const editorsByCard = new Map<string, BoardMember[]>();
-  for (const v of viewers) {
-    const member = memberById.get(v.userId);
-    if (!member || !v.editingCardId || v.userId === currentUser?.id) continue;
-    editorsByCard.set(v.editingCardId, [...(editorsByCard.get(v.editingCardId) ?? []), member]);
-  }
   const otherViewerCount = [...viewerIds].filter((id) => id !== currentUser?.id).length;
+
+  // Edit locks (server-side, authoritative): who else is editing which card
+  const lockedByOther = new Map<string, UserSummary>();
+  for (const card of Object.values(board.cards)) {
+    if (card.lock && card.lock.userId !== currentUser?.id) {
+      lockedByOther.set(
+        card.id,
+        memberById.get(card.lock.userId) ?? { id: card.lock.userId, name: card.lock.name, email: "" }
+      );
+    }
+  }
+
+  // Hold the lock for the card open in the edit dialog
+  const [saveError, setSaveError] = useState<string | undefined>();
+  const [saveConflict, setSaveConflict] = useState(false);
+  const [historyKey, setHistoryKey] = useState(0);
+  const [dialogNotice, setDialogNotice] = useState<
+    { message: string; actionLabel?: string; onAction?: () => void } | undefined
+  >();
+
+  // "Saved · Undo" toast. `undoTo` is the version restoring it goes back to, and
+  // `current` the version we expect to replace (so we never undo someone else's newer save).
+  const [toast, setToast] = useState<
+    | { message: string; action?: { label: string; cardId: string; undoTo: number; current: number }; tone?: "error" }
+    | null
+  >(null);
+  const toastTimer = useRef<number | undefined>(undefined);
+  const showToast = (next: NonNullable<typeof toast>) => {
+    window.clearTimeout(toastTimer.current);
+    setToast(next);
+    toastTimer.current = window.setTimeout(() => setToast(null), 10_000);
+  };
+
+  const restoreVersion = async (cardId: string, version: number, expectedVersion: number) => {
+    const res = await apiFetch(`/api/cards/${encodeURIComponent(cardId)}/revisions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version, expectedVersion }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  };
+
+  const runToastAction = async () => {
+    const action = toast?.action;
+    if (!action) return;
+    setToast(null);
+    const { ok, status, data } = await restoreVersion(action.cardId, action.undoTo, action.current);
+    if (!ok) {
+      showToast({
+        tone: "error",
+        message:
+          status === 409
+            ? "Can't undo: someone else changed this card since. Check its history."
+            : data.error || "Couldn't undo that change",
+      });
+      return;
+    }
+    const fresh = await fetchBoard();
+    // If that card is open in the editor, show the undone version there too
+    if (isCardDialogOpen && editingCard?.id === action.cardId && fresh?.cards?.[action.cardId]) {
+      setEditingCard(fresh.cards[action.cardId]);
+    }
+    setHistoryKey((k) => k + 1);
+    if (data.revision) {
+      // Offer to reverse the undo as well
+      showToast({
+        message: action.label === "Undo" ? "Change undone" : "Change redone",
+        action: {
+          label: action.label === "Undo" ? "Redo" : "Undo",
+          cardId: action.cardId,
+          undoTo: data.revision.previousVersion,
+          current: data.revision.version,
+        },
+      });
+    }
+    if (data.warnings?.[0]) showToast({ message: data.warnings[0] });
+  };
+
+  // Ctrl/Cmd+Z triggers the toast's Undo when you're not typing somewhere
+  const runToastActionRef = useRef(runToastAction);
+  runToastActionRef.current = runToastAction;
+  useEffect(() => {
+    if (!toast?.action || toast.action.label !== "Undo") return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !typing && !isCardDialogOpen) {
+        e.preventDefault();
+        runToastActionRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toast, isCardDialogOpen]);
+  const cardLock = useCardLock(isCardDialogOpen && editingCard ? editingCard.id : null, {
+    // We waited for (or took over from) another editor: show their latest saved version
+    onReacquired: async (cardId) => {
+      const fresh = await fetchBoard();
+      if (fresh?.cards?.[cardId]) setEditingCard(fresh.cards[cardId]);
+    },
+  });
+  lockRecheckRef.current = isCardDialogOpen && editingCard ? cardLock.recheck : null;
 
   useEffect(() => {
     if (!isShared) return;
@@ -221,13 +317,14 @@ export function KanbanBoard({
     }
   };
 
-  const fetchBoard = async () => {
+  const fetchBoard = async (): Promise<KanbanBoardType | null> => {
     try {
       const response = await apiFetch(`/api/board${boardQuery}`);
       if (response.ok) {
         const data = await response.json();
         setBoard(data);
         if (data.board) onBoardLoaded?.(data.board);
+        return data;
       } else if (response.status === 404 && boardId) {
         // Removed from this shared board (or it was deleted): go back to your own board
         onLeftBoard?.();
@@ -239,6 +336,7 @@ export function KanbanBoard({
     } finally {
       setLoading(false);
     }
+    return null;
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -341,6 +439,7 @@ export function KanbanBoard({
   };
 
   const handleEditCard = (card: KanbanCardType) => {
+    setDialogNotice(undefined);
     setEditingCard(card);
     // Find the column this card belongs to
     const column = board.columns.find(col => col.cardIds.includes(card.id));
@@ -401,7 +500,9 @@ export function KanbanBoard({
     priority: 'low' | 'medium' | 'high';
     tagIds: string[];
     assigneeId?: string | null;
-  }) => {
+  }): Promise<boolean> => {
+    setSaveError(undefined);
+    setSaveConflict(false);
     if (editingCard) {
       // Update existing card
       try {
@@ -415,12 +516,38 @@ export function KanbanBoard({
             priority: data.priority,
             tagIds: data.tagIds,
             ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId }),
+            // The version this editor loaded: the server refuses the save if someone saved since
+            ...(editingCard.version !== undefined && { expectedVersion: editingCard.version }),
           }),
         });
 
+        if (response.status === 409) {
+          const body = await response.json().catch(() => ({}));
+          setSaveError(body.error || "Someone else changed this card since you opened it");
+          setSaveConflict(true);
+          return false;
+        }
+        if (response.status === 423) {
+          // Someone else holds the edit lock: keep the dialog open so nothing is lost
+          const body = await response.json().catch(() => ({}));
+          setSaveError(body.error || "Someone else is editing this card");
+          return false;
+        }
         if (response.ok) {
+          const saved = await response.json().catch(() => ({}));
           // Refresh board to get updated card with tags
           await fetchBoard();
+          if (saved.revision) {
+            showToast({
+              message: `Saved "${data.title}"`,
+              action: {
+                label: "Undo",
+                cardId: editingCard.id,
+                undoTo: saved.revision.previousVersion,
+                current: saved.revision.version,
+              },
+            });
+          }
         }
       } catch (error) {
         console.error("Error updating card:", error);
@@ -454,6 +581,7 @@ export function KanbanBoard({
     setIsCardDialogOpen(false);
     setEditingCard(null);
     setTargetColumnId(null);
+    return true;
   };
 
   const handleDeleteCard = async (cardId: string) => {
@@ -461,6 +589,12 @@ export function KanbanBoard({
       const response = await apiFetch(`/api/cards/${cardId}`, {
         method: "DELETE",
       });
+
+      if (response.status === 423) {
+        const body = await response.json().catch(() => ({}));
+        window.alert(body.error || "Someone else is editing this card");
+        return;
+      }
 
       if (response.ok) {
         // Poof/smoke effect for archive
@@ -578,11 +712,8 @@ export function KanbanBoard({
       await apiFetch(`/api/cards/${card.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: card.title,
-          notes: card.notes,
-          generatedPrompt: data.prompt,
-        }),
+        // Only the prompt: re-sending title/notes could overwrite someone else's edits
+        body: JSON.stringify({ generatedPrompt: data.prompt }),
       });
 
       // Update local state
@@ -769,7 +900,7 @@ export function KanbanBoard({
                         ? card.assigneeId === currentUser?.id
                         : !card.assigneeId
                   )}
-                editorsByCard={editorsByCard}
+                lockedByOther={lockedByOther}
                 onAddCard={handleAddCard}
                 onEditCard={handleEditCard}
                 onDeleteCard={handleDeleteCard}
@@ -797,7 +928,14 @@ export function KanbanBoard({
 
       <CardDialog
         open={isCardDialogOpen}
-        onOpenChange={setIsCardDialogOpen}
+        onOpenChange={(open) => {
+          setIsCardDialogOpen(open);
+          if (!open) {
+            setSaveError(undefined);
+            setSaveConflict(false);
+            setDialogNotice(undefined);
+          }
+        }}
         onSave={handleSaveCard}
         initialCard={editingCard || undefined}
         cardId={editingCard?.id}
@@ -806,8 +944,88 @@ export function KanbanBoard({
         onColumnChange={handleColumnChange}
         members={board.members}
         currentUserId={currentUser?.id}
-        otherEditors={editingCard ? editorsByCard.get(editingCard.id) : undefined}
+        lockState={editingCard ? cardLock.state : undefined}
+        onTakeOver={cardLock.takeOver}
+        saveError={saveError}
+        historyRefreshKey={`${historyKey}:${editingCard?.version ?? 0}`}
+        notice={dialogNotice}
+        onReloadLatest={
+          saveConflict && editingCard
+            ? async () => {
+                const fresh = await fetchBoard();
+                if (fresh?.cards?.[editingCard.id]) setEditingCard(fresh.cards[editingCard.id]);
+                setSaveError(undefined);
+                setSaveConflict(false);
+              }
+            : undefined
+        }
+        onRestoreVersion={
+          editingCard
+            ? async (version, latestVersion) => {
+                setSaveError(undefined);
+                const { ok, status, data } = await restoreVersion(editingCard.id, version, latestVersion);
+                if (!ok) {
+                  setSaveError(
+                    status === 409
+                      ? "Someone else changed this card since you opened it. Load the latest version first."
+                      : data.error || "Couldn't restore that version"
+                  );
+                  setSaveConflict(status === 409);
+                  return;
+                }
+                // Show the restored version in the dialog (it replaces unsaved edits, as confirmed)
+                const fresh = await fetchBoard();
+                if (fresh?.cards?.[editingCard.id]) setEditingCard(fresh.cards[editingCard.id]);
+                setHistoryKey((k) => k + 1);
+                if (data.warnings?.[0]) setSaveError(data.warnings[0]);
+                if (data.revision) {
+                  // Undo inside the dialog: a toast behind the modal can't be clicked
+                  const cardId = editingCard.id;
+                  const { version: current, previousVersion } = data.revision;
+                  setDialogNotice({
+                    message: `Restored version ${version}.`,
+                    actionLabel: "Undo",
+                    onAction: async () => {
+                      const undo = await restoreVersion(cardId, previousVersion, current);
+                      if (!undo.ok) {
+                        setDialogNotice(undefined);
+                        setSaveError(undo.status === 409 ? "Can't undo: someone else changed this card since." : undo.data.error || "Couldn't undo");
+                        return;
+                      }
+                      const latest = await fetchBoard();
+                      if (latest?.cards?.[cardId]) setEditingCard(latest.cards[cardId]);
+                      setHistoryKey((k) => k + 1);
+                      setDialogNotice({ message: "Restore undone." });
+                    },
+                  });
+                }
+              }
+            : undefined
+        }
       />
+
+      {/* Hidden while a dialog is open: the modal blocks clicks outside it */}
+      {toast && !isCardDialogOpen && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="toast"
+          className={`fixed bottom-4 left-1/2 z-[60] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-lg border-2 px-4 py-2 text-sm shadow-lg ${
+            toast.tone === "error" ? "border-destructive/40 bg-destructive text-destructive-foreground" : "border-border bg-card text-foreground"
+          }`}
+        >
+          <span className="truncate">{toast.message}</span>
+          {toast.action && (
+            <Button size="sm" variant="outline" className="h-7 gap-1" onClick={runToastAction}>
+              <Undo2 className="h-3 w-3" />
+              {toast.action.label}
+            </Button>
+          )}
+          <button type="button" aria-label="Dismiss" className="opacity-70 hover:opacity-100" onClick={() => setToast(null)}>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       <ColumnDialog
         open={isColumnDialogOpen}
