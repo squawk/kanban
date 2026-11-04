@@ -134,6 +134,16 @@ export const auditLogs = sqliteTable("audit_logs", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// Due-date reminders already sent. The due day is part of the key, so changing a
+// card's due date re-arms its reminders; the primary key makes sends idempotent.
+export const dueReminders = sqliteTable("due_reminders", {
+  cardId: text("card_id").notNull().references(() => cards.id, { onDelete: "cascade" }),
+  kind: text("kind", { enum: ["due_soon", "overdue"] }).notNull(),
+  dueDay: text("due_day").notNull(), // YYYY-MM-DD
+  userId: text("user_id").notNull(),
+  sentAt: integer("sent_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
 // Key/value app settings editable by admins (e.g. sign-up policy)
 export const appSettings = sqliteTable("app_settings", {
   key: text("key").primaryKey(),

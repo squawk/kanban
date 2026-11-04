@@ -14,6 +14,9 @@ vi.hoisted(() => {
   process.env.DATABASE_PATH = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kanban-test-")), "test.db");
   process.env.SESSION_SECRET = "test_secret_that_is_at_least_32_characters_long";
   process.env.ADMIN_EMAIL = "admin@acme.com";
+  process.env.REMINDER_TIMEZONE = "UTC";
+  process.env.REMINDER_HOUR = "8";
+  process.env.CRON_SECRET = "cron-secret-for-tests";
   delete process.env.SENDGRID_API_KEY;
 });
 
@@ -52,11 +55,13 @@ import * as comments from "~/routes/api.cards.$cardId.comments";
 import * as activity from "~/routes/api.cards.$cardId.activity";
 import * as column from "~/routes/api.columns.$columnId";
 import * as myTasks from "~/routes/api.my-tasks";
+import * as cron from "~/routes/api.cron.due-reminders";
+import * as reminders from "~/lib/due-reminders.server";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const m: Record<string, any> = {
   auth, notifications, login: login_, register, acceptInvite, me, adminUsers, adminInvites, adminSettings,
-  adminAudit, board, boards, members, cards, card, comments, activity, column, myTasks,
+  adminAudit, board, boards, members, cards, card, comments, activity, column, myTasks, cron, reminders,
 };
 let ipCounter = 0;
 
@@ -450,5 +455,87 @@ describe("audit log API", () => {
     expect(csv.headers.get("content-type")).toContain("text/csv");
     const text = await csv.text();
     expect(text.split("\n")[0]).toBe("time,actor,action,entity_type,entity_id,board_id,summary,ip");
+  });
+});
+
+describe("due-date reminders", () => {
+  const NOW = new Date("2026-11-05T15:00:00Z"); // 15:00 UTC, after the 08:00 send hour
+  let owner: { id: string; email: string };
+  let helper: { id: string; email: string };
+  let ownerCookie: string;
+  let boardId: string;
+  let todo: string;
+  let done: string;
+
+  async function newCard(title: string, dueDate: string, assigneeId?: string, columnId = todo) {
+    const res = await m.cards.action({
+      request: req("/api/cards", { method: "POST", cookie: ownerCookie, body: { title, dueDate, columnId, assigneeId } }),
+    });
+    return (await body(res)).id as string;
+  }
+
+  beforeAll(async () => {
+    owner = await createActiveUser("rita@acme.com", "Rita");
+    helper = await createActiveUser("hal@acme.com", "Hal");
+    ownerCookie = await login(owner.email);
+    const data = await body(await m.board.loader({ request: req("/api/board", { cookie: ownerCookie }) }));
+    boardId = data.board.id;
+    todo = data.columns[0].id;
+    done = data.columns[2].id;
+    await m.members.action({ request: req("/x", { method: "POST", cookie: ownerCookie, body: { userId: helper.id } }), params: { boardId } });
+  });
+
+  it("does nothing before the configured send hour", async () => {
+    const res = await m.reminders.runDueReminders(new Date("2026-11-05T06:00:00Z"));
+    expect(res).toMatchObject({ ran: false, reason: "too_early" });
+  });
+
+  it("sends one digest per person, to the assignee or else the creator, exactly once", async () => {
+    await newCard("Assigned due tomorrow", "2026-11-06", helper.id);
+    await newCard("Unassigned overdue", "2026-11-03");
+    await newCard("Already done", "2026-11-06", undefined, done);
+    await newCard("Next month", "2026-12-06");
+    await newCard("Ancient", "2026-09-01");
+    sent.length = 0;
+
+    const first = await m.reminders.runDueReminders(NOW);
+    expect(first).toMatchObject({ ran: true, emailsSent: 2, remindersSent: 2 });
+    const byTo = Object.fromEntries(sent.map((s) => [s.to as string, s.subject]));
+    expect(byTo[helper.email]).toBe('Due tomorrow: "Assigned due tomorrow"');
+    expect(byTo[owner.email]).toBe('Overdue: "Unassigned overdue"');
+
+    sent.length = 0;
+    const second = await m.reminders.runDueReminders(NOW);
+    expect(second.remindersSent).toBe(0);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("re-arms when the due date changes and respects the opt-out", async () => {
+    const id = await newCard("Moving target", "2026-11-06");
+    await m.reminders.runDueReminders(NOW);
+    await m.card.action({ request: req("/x", { method: "PUT", cookie: ownerCookie, body: { dueDate: "2026-11-05" } }), params: { cardId: id } });
+
+    await m.me.action({ request: req("/x", { method: "PATCH", cookie: ownerCookie, body: { emailNotifications: false } }) });
+    sent.length = 0;
+    expect((await m.reminders.runDueReminders(NOW)).remindersSent).toBe(0);
+
+    await m.me.action({ request: req("/x", { method: "PATCH", cookie: ownerCookie, body: { emailNotifications: true } }) });
+    const res = await m.reminders.runDueReminders(NOW);
+    expect(res.remindersSent).toBe(1);
+    expect(sent.at(-1)!.subject).toBe('Due today: "Moving target"');
+  });
+
+  it("protects the cron endpoint with CRON_SECRET", async () => {
+    const noAuth = await m.cron.action({ request: req("/api/cron/due-reminders", { method: "POST" }) });
+    expect(noAuth.status).toBe(401);
+    const bad = new Request("http://localhost/api/cron/due-reminders", { method: "POST", headers: { Authorization: "Bearer nope" } });
+    expect((await m.cron.action({ request: bad })).status).toBe(401);
+    const good = new Request("http://localhost/api/cron/due-reminders", {
+      method: "POST",
+      headers: { Authorization: "Bearer cron-secret-for-tests" },
+    });
+    const res = await m.cron.action({ request: good });
+    expect(res.status).toBe(200);
+    expect(await body(res)).toHaveProperty("today");
   });
 });

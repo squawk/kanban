@@ -34,6 +34,7 @@ export default [
   route("api/boards", "routes/api.boards.ts"),
   route("api/boards/:boardId/members", "routes/api.boards.$boardId.members.ts"),
   route("api/my-tasks", "routes/api.my-tasks.ts"),
+  route("api/cron/due-reminders", "routes/api.cron.due-reminders.ts"),
   // Board routes
   route("api/generate-prompt", "routes/api.generate-prompt.ts"),
   route("api/board", "routes/api.board.ts"),

@@ -38,3 +38,23 @@ export function getSignupDefaults(): { mode: SignupMode; allowedDomains: string[
 }
 
 export const INVITATION_TTL_DAYS = 7;
+
+/** Due-date reminder settings. */
+export function getReminderConfig() {
+  const tz = process.env.REMINDER_TIMEZONE || "UTC";
+  let timeZone = tz;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+  } catch {
+    console.warn(`Invalid REMINDER_TIMEZONE "${tz}", falling back to UTC`);
+    timeZone = "UTC";
+  }
+  const hour = Number(process.env.REMINDER_HOUR ?? 8);
+  return {
+    enabled: process.env.DUE_REMINDERS_ENABLED !== "false",
+    timeZone,
+    /** Local hour (0-23) before which no reminders are sent, so nobody gets mail at midnight */
+    sendAfterHour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : 8,
+    cronSecret: process.env.CRON_SECRET || "",
+  };
+}

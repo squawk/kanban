@@ -18,6 +18,7 @@ A modern kanban board application built with React Router 7, Tailwind CSS, and s
 - **User management**: approve or reject pending sign-ups, disable accounts (signs them out immediately), or delete them.
 - **Shared boards & assignment**: board owners share their board with other users from the **Share** button. Anyone on a board can assign cards to board members, filter by "Assigned to me" or "Unassigned", and see everything assigned to them across boards in **My Tasks**.
 - **Audit trail**: sign-ins, admin actions, sharing, and every card change (field-level diffs, moves, assignments, comments) are recorded. Admins can search, filter, and export the log as CSV; board members see a card's history under **Show activity**.
+- **Due-date reminders**: a daily digest email to each person with cards due tomorrow or today and cards that have just become overdue (assignee first, otherwise the card's creator). Cards in a Completed/Done column are skipped, each reminder is sent once (changing the due date re-arms it), and the same opt-out applies. The app checks hourly while running; `.github/workflows/due-reminders.yml` also wakes it daily via `POST /api/cron/due-reminders`.
 - **Email notifications** (SendGrid): when you're assigned a card, when someone comments on or moves a card you created or are assigned to, and when a board is shared with you. Users can turn these off from the account menu (click your avatar).
 
 See `.env.example` for the related environment variables.

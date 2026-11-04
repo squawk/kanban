@@ -157,6 +157,15 @@ export function initializeDatabase() {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS due_reminders (
+      card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      due_day TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      sent_at INTEGER NOT NULL,
+      PRIMARY KEY (card_id, kind, due_day)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_board_members_user_id ON board_members(user_id);
     CREATE INDEX IF NOT EXISTS idx_invitations_email ON invitations(email);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);

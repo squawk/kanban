@@ -4,6 +4,10 @@ import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { PassThrough } from "node:stream";
 import { SECURITY_HEADERS } from "./lib/security";
+import { startDueReminderScheduler } from "./lib/due-reminders.server";
+
+// Hourly due-date reminder emails (idempotent; see lib/due-reminders.server.ts)
+startDueReminderScheduler();
 
 const ABORT_DELAY = 5_000;
 
