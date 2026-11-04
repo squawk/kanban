@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import type { Route } from "./+types/api.generate-prompt";
 import { getSession, isActiveUser } from "~/lib/auth";
 import { checkRateLimit, rateLimitResponse, INPUT_LIMITS } from "~/lib/security";
@@ -18,8 +18,8 @@ export async function action({ request }: Route.ActionArgs) {
       );
     }
 
-    // Rate limiting to prevent OpenAI API cost abuse
-    const rateLimit = await checkRateLimit(session.userId, "openai");
+    // Rate limiting to prevent AI API cost abuse
+    const rateLimit = await checkRateLimit(session.userId, "ai");
     if (!rateLimit.allowed) {
       return rateLimitResponse(rateLimit.retryAfter!);
     }
@@ -47,17 +47,17 @@ export async function action({ request }: Route.ActionArgs) {
       );
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       return new Response(
         JSON.stringify({
-          error: "OpenAI API key not configured. Please set OPENAI_API_KEY environment variable."
+          error: "Claude API key not configured. Please set the ANTHROPIC_API_KEY secret."
         }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    const openai = new OpenAI({ apiKey });
+    const client = new Anthropic({ apiKey });
 
     const systemPrompt = `You are an AI assistant that helps developers create detailed prompts for Claude Code, an AI coding assistant.
 Your job is to take a feature title and optional notes from a kanban card and transform it into a clear, detailed prompt that can be given to Claude Code to implement that feature.
@@ -76,17 +76,30 @@ Keep the prompt concise but comprehensive, typically 2-5 sentences.`;
 
 Generate a prompt I can give to Claude Code to implement this feature.`;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ],
-      temperature: 0.7,
-      max_tokens: 500,
+    const response = await client.beta.messages.create({
+      model: "claude-opus-5-5",
+      // Room for adaptive thinking (always on for this model) plus the 2-5 sentence answer
+      max_tokens: 4000,
+      output_config: { effort: "low" },
+      // If Claude's safety classifiers decline a benign request, retry it server-side
+      // on Anthropic's recommended fallback model instead of failing.
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }],
     });
 
-    const generatedPrompt = completion.choices[0]?.message?.content;
+    if (response.stop_reason === "refusal") {
+      return new Response(
+        JSON.stringify({ error: "Claude declined to generate a prompt for this card" }),
+        { status: 422, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const generatedPrompt = response.content
+      .flatMap((block) => (block.type === "text" ? [block.text] : []))
+      .join("")
+      .trim();
 
     if (!generatedPrompt) {
       return new Response(
@@ -101,10 +114,21 @@ Generate a prompt I can give to Claude Code to implement this feature.`;
     );
   } catch (error) {
     console.error("Error generating prompt:", error);
+    if (error instanceof Anthropic.RateLimitError) {
+      return new Response(
+        JSON.stringify({ error: "The AI service is busy. Please try again in a moment." }),
+        { status: 429, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    if (error instanceof Anthropic.APIError) {
+      // Don't leak upstream details (e.g. an invalid key) to the browser
+      return new Response(
+        JSON.stringify({ error: "The AI service returned an error" }),
+        { status: 502, headers: { "Content-Type": "application/json" } }
+      );
+    }
     return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : "An unexpected error occurred"
-      }),
+      JSON.stringify({ error: "An unexpected error occurred" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

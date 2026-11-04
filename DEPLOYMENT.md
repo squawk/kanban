@@ -39,7 +39,7 @@ Reuse the current production values, so `SESSION_SECRET` keeps old admin-approva
 npx wrangler secret put SESSION_SECRET        # ≥ 32 chars
 npx wrangler secret put SENDGRID_API_KEY
 npx wrangler secret put FROM_EMAIL            # must be a verified SendGrid sender
-npx wrangler secret put OPENAI_API_KEY        # AI prompt generation
+npx wrangler secret put ANTHROPIC_API_KEY        # AI prompt generation
 npx wrangler secret put RECAPTCHA_SECRET_KEY  # optional
 npx wrangler secret put CRON_SECRET           # optional: enables POST /api/cron/due-reminders
 npx wrangler secret put SUPABASE_SECRET_KEY   # live updates: Supabase "secret" (or legacy service_role) key
