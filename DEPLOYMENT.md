@@ -11,6 +11,7 @@ The app runs on **Cloudflare Workers** at **https://kanban.skyhawklabs.dev**, wi
 | Database schema | `app/lib/db/schema.ts` → migrations in `drizzle/` |
 | CI deploy | `.github/workflows/deploy.yml` (push to `main`) |
 | Due-date reminders | Cron Trigger `17 * * * *` → `workers/app.ts` `scheduled()` |
+| Live board updates | Supabase Realtime Broadcast → `app/lib/realtime.server.ts` / `realtime-client.ts` |
 
 ## One-time setup
 
@@ -41,10 +42,25 @@ npx wrangler secret put FROM_EMAIL            # must be a verified SendGrid send
 npx wrangler secret put OPENAI_API_KEY        # AI prompt generation
 npx wrangler secret put RECAPTCHA_SECRET_KEY  # optional
 npx wrangler secret put CRON_SECRET           # optional: enables POST /api/cron/due-reminders
+npx wrangler secret put SUPABASE_SECRET_KEY   # live updates: Supabase "secret" (or legacy service_role) key
 ```
 Non-secret settings (`APP_URL`, `ADMIN_EMAIL`, `SIGNUP_MODE`, `REMINDER_TIMEZONE`, …) are in
 `wrangler.jsonc` → `vars`. The sign-up policy there is only a default: admins change it under
 **Admin → Sign-up**.
+
+### Live board updates (Supabase Realtime)
+1. In `wrangler.jsonc` → `vars`, set `SUPABASE_URL` (`https://<project-ref>.supabase.co`) and
+   `SUPABASE_PUBLISHABLE_KEY` (the publishable/anon key). Both are public.
+2. Set the `SUPABASE_SECRET_KEY` secret (above).
+3. In Supabase, go to **Realtime → Settings** and keep **"Allow public access"** enabled.
+
+How it works: after any board change, the Worker broadcasts a content-free "changed" signal
+to that board's channel, and open browsers refetch through the normal authenticated API. No
+board data goes through Realtime, and the tables stay locked by RLS. Channel names are an
+HMAC of the board id (keyed by `REALTIME_TOPIC_SECRET`, or `SESSION_SECRET` if that isn't set),
+so only people who can open a board learn its channel. Someone removed from a board who still
+remembers the channel name can only see *when* it changes, never what changed. If Realtime is
+unavailable, shared boards poll every 30 seconds instead.
 
 If you send from `@skyhawklabs.dev`, complete SendGrid **domain authentication** and add its DNS
 records in the Cloudflare dashboard.

@@ -27,10 +27,13 @@ import type {
   CurrentUser,
 } from "~/lib/types";
 import { apiFetch } from "~/lib/api";
+import { subscribeToBoard, type RealtimeStatus } from "~/lib/realtime-client";
 
 type AssigneeFilter = "all" | "mine" | "unassigned";
 
+/** Polling for shared boards: frequent without Realtime, a slow safety net with it */
 const REFRESH_INTERVAL_MS = 30_000;
+const LIVE_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 interface KanbanBoardProps {
   /** Board to show; defaults to the current user's own board */
@@ -105,22 +108,59 @@ export function KanbanBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openCardId, loading]);
 
-  // Keep shared boards fresh: poll while the tab is visible and nothing is being edited
+  // Keep shared boards fresh. Refreshes wait while something is being edited or
+  // dragged (so a collaborator's change never yanks a dialog or drag out from under you)
+  // and run as soon as you're done.
+  const isBusy = isCardDialogOpen || isColumnDialogOpen || isArchivedDialogOpen || isMembersDialogOpen || !!activeCard;
   const busyRef = useRef(false);
-  busyRef.current = isCardDialogOpen || isColumnDialogOpen || isArchivedDialogOpen || isMembersDialogOpen || !!activeCard;
+  busyRef.current = isBusy;
+  const pendingRefreshRef = useRef(false);
+  const debounceRef = useRef<number | undefined>(undefined);
+  const [liveStatus, setLiveStatus] = useState<RealtimeStatus | null>(null);
+
   const refresh = useCallback(() => {
-    if (!busyRef.current && document.visibilityState === "visible") fetchBoard();
+    if (busyRef.current || document.visibilityState !== "visible") {
+      pendingRefreshRef.current = true;
+      return;
+    }
+    pendingRefreshRef.current = false;
+    window.clearTimeout(debounceRef.current);
+    // Coalesce bursts (e.g. a drag that moves several cards) into one fetch
+    debounceRef.current = window.setTimeout(() => {
+      fetchBoard();
+      fetchArchivedCount();
+    }, 250);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId]);
+
+  useEffect(() => {
+    if (!isBusy && pendingRefreshRef.current) refresh();
+  }, [isBusy, refresh]);
+
+  // Live updates over Supabase Realtime for shared boards
+  const realtimeTopic = isShared ? board.realtime?.topic : undefined;
+  useEffect(() => {
+    if (!realtimeTopic || !board.realtime) {
+      setLiveStatus(null);
+      return;
+    }
+    return subscribeToBoard(board.realtime, refresh, setLiveStatus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realtimeTopic, refresh]);
+
   useEffect(() => {
     if (!isShared) return;
-    const id = window.setInterval(refresh, REFRESH_INTERVAL_MS);
-    document.addEventListener("visibilitychange", refresh);
+    const interval = liveStatus === "live" ? LIVE_REFRESH_INTERVAL_MS : REFRESH_INTERVAL_MS;
+    const id = window.setInterval(refresh, interval);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearInterval(id);
-      document.removeEventListener("visibilitychange", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [isShared, refresh]);
+  }, [isShared, liveStatus, refresh]);
 
   const saveColumns = (newColumns: KanbanBoardType["columns"]) =>
     apiFetch("/api/board", {
@@ -150,6 +190,9 @@ export function KanbanBoard({
         const data = await response.json();
         setBoard(data);
         if (data.board) onBoardLoaded?.(data.board);
+      } else if (response.status === 404 && boardId) {
+        // Removed from this shared board (or it was deleted): go back to your own board
+        onLeftBoard?.();
       } else {
         console.error("Failed to fetch board");
       }
@@ -550,6 +593,16 @@ export function KanbanBoard({
                 {board.board.name}
                 {!isOwner && (
                   <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">shared with you</span>
+                )}
+                {liveStatus === "live" && (
+                  <span
+                    className="ml-2 inline-flex items-center gap-1 align-middle text-xs font-normal text-muted-foreground"
+                    title="Changes from other people appear automatically"
+                    data-testid="live-indicator"
+                  >
+                    <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" aria-hidden="true" />
+                    Live
+                  </span>
                 )}
               </h2>
             )}

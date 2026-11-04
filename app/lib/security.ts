@@ -131,7 +131,7 @@ export const SECURITY_HEADERS: Record<string, string> = {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",   // unsafe-inline needed for Tailwind, fonts for theme
     "img-src 'self' data: https:",
     "font-src 'self' https://fonts.gstatic.com",  // Google Fonts
-    "connect-src 'self' https://api.openai.com",
+    "connect-src 'self' https://api.openai.com wss://*.supabase.co",  // Supabase Realtime (live board updates)
     "worker-src 'self' blob:",  // Allow web workers from blob URLs (needed for canvas-confetti)
     "frame-ancestors 'none'",
     "base-uri 'self'",

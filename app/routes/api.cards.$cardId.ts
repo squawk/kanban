@@ -8,6 +8,7 @@ import { INPUT_LIMITS } from "~/lib/security";
 import { diffCard } from "~/lib/card-diff";
 import { logAudit } from "~/lib/audit.server";
 import { notifyCardAssigned } from "~/lib/notifications.server";
+import { broadcastBoardChanged } from "~/lib/realtime.server";
 
 const PRIORITIES = ["low", "medium", "high"];
 
@@ -76,6 +77,7 @@ export const action = api(
       });
 
       const updatedCard = (await db.select().from(cards).where(eq(cards.id, cardId)).limit(1).then(firstRow))!;
+      broadcastBoardChanged(card.boardId); // covers edits the audit log skips (e.g. AI prompt)
 
       // Audit the field-level changes
       const changes = diffCard(

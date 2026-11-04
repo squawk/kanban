@@ -3,6 +3,7 @@ import { and, desc, eq, gte, lt, or, sql, type SQL, type AnyColumn } from "drizz
 import { db } from "./db";
 import { auditLogs } from "./db/schema";
 import { getClientIP } from "./security";
+import { broadcastBoardChanged } from "./realtime.server";
 
 export interface AuditActor {
   id: string;
@@ -25,6 +26,8 @@ export interface AuditEvent {
  * user-facing operation, but failures are logged.
  */
 export async function logAudit(event: AuditEvent): Promise<void> {
+  // Every board mutation is audited, so this is also where live viewers get notified
+  if (event.boardId) broadcastBoardChanged(event.boardId);
   try {
     await db.insert(auditLogs)
       .values({

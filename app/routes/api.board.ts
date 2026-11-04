@@ -13,6 +13,7 @@ import { json, jsonError, readJson } from "~/lib/http";
 import { detectCardMoves } from "~/lib/card-diff";
 import { logAudit } from "~/lib/audit.server";
 import { notifyCardMoved } from "~/lib/notifications.server";
+import { broadcastBoardChanged, clientRealtimeConfig } from "~/lib/realtime.server";
 
 // GET /api/board?boardId= - Get a kanban board (defaults to the user's own board)
 export const loader = api("fetch board", async ({ request }: { request: Request }) => {
@@ -34,6 +35,7 @@ export const loader = api("fetch board", async ({ request }: { request: Request 
 
   return json({
     board: { id: board.id, name: board.name, role },
+    realtime: clientRealtimeConfig(board.id),
     members: await getBoardParticipants(board.id),
     columns: boardColumns.map((col) => ({
       id: col.id,
@@ -104,6 +106,8 @@ export const action = api("update board", async ({ request }: { request: Request
   });
   if ("error" in result) return result.error!;
   const { existingById, beforeLayout, afterLayout } = result;
+  // Reorders aren't audited, so signal live viewers explicitly (deduped per request)
+  broadcastBoardChanged(board.id);
 
   // Audit + notify on cards that changed column
   const moves = detectCardMoves(beforeLayout, afterLayout);
