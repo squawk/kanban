@@ -1,216 +1,128 @@
 import { db } from "~/lib/db";
-import { boards, columns, cards, comments, cardTags, tags } from "~/lib/db/schema";
+import { columns, cards } from "~/lib/db/schema";
 import { eq, asc, and, isNull, inArray } from "drizzle-orm";
-import { getSession, getUserBoard, createUserBoard } from "~/lib/auth";
+import {
+  api,
+  boardIdFromRequest,
+  getBoardParticipants,
+  requireUser,
+  resolveBoard,
+} from "~/lib/access.server";
+import { serializeCards } from "~/lib/board-serialize.server";
+import { json, jsonError, readJson } from "~/lib/http";
+import { detectCardMoves } from "~/lib/card-diff";
+import { logAudit } from "~/lib/audit.server";
+import { notifyCardMoved } from "~/lib/notifications.server";
 
-// GET /api/board - Get the kanban board with all columns and cards
-export async function loader({ request }: { request: Request }) {
-  try {
-    const session = await getSession(request);
+// GET /api/board?boardId= - Get a kanban board (defaults to the user's own board)
+export const loader = api("fetch board", async ({ request }: { request: Request }) => {
+  const user = await requireUser(request);
+  const { board, role } = resolveBoard(user, boardIdFromRequest(request));
 
-    if (!session.userId) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+  const boardColumns = db
+    .select()
+    .from(columns)
+    .where(eq(columns.boardId, board.id))
+    .orderBy(asc(columns.position))
+    .all();
+
+  const boardCards = db
+    .select()
+    .from(cards)
+    .where(and(eq(cards.boardId, board.id), isNull(cards.archivedAt)))
+    .all();
+
+  const serialized = serializeCards(boardCards);
+
+  return json({
+    board: { id: board.id, name: board.name, role },
+    members: getBoardParticipants(board.id),
+    columns: boardColumns.map((col) => ({
+      id: col.id,
+      title: col.title,
+      cardIds: JSON.parse(col.cardIds),
+    })),
+    cards: Object.fromEntries(serialized.map((c) => [c.id, c])),
+  });
+});
+
+// PUT /api/board - Update column order / card placement (drag and drop)
+export const action = api("update board", async ({ request }: { request: Request }) => {
+  if (request.method !== "PUT") return jsonError("Method not allowed", 405);
+
+  const user = await requireUser(request);
+  const body = await readJson<{ boardId?: string; columns?: unknown }>(request);
+  const { board } = resolveBoard(user, body.boardId ?? boardIdFromRequest(request));
+  const newColumns = body.columns;
+
+  if (!Array.isArray(newColumns)) return jsonError("Invalid request format", 400);
+
+  const existingColumns = db.select().from(columns).where(eq(columns.boardId, board.id)).all();
+  const existingById = new Map(existingColumns.map((c) => [c.id, c]));
+  const beforeLayout = existingColumns.map((c) => ({ id: c.id, cardIds: JSON.parse(c.cardIds) as string[] }));
+
+  // Validate every column and card belongs to this board
+  const submittedCardIds = new Set<string>();
+  for (const col of newColumns) {
+    if (!col || typeof col.id !== "string" || !Array.isArray(col.cardIds)) {
+      return jsonError("Invalid column format", 400);
     }
-
-    // Get user's board, create if doesn't exist
-    let board = getUserBoard(session.userId);
-
-    if (!board) {
-      // Create board for existing users who don't have one
-      const newBoard = createUserBoard(session.userId);
-      board = getUserBoard(session.userId);
-
-      if (!board) {
-        return new Response(
-          JSON.stringify({ error: "Failed to create board. Please contact support." }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
-        );
-      }
+    if (!existingById.has(col.id)) return jsonError("Column not found or access denied", 403);
+    for (const cardId of col.cardIds) {
+      if (typeof cardId !== "string") return jsonError("Invalid card ID format", 400);
+      submittedCardIds.add(cardId);
     }
-
-    // Get columns for this board
-    const boardColumns = db
-      .select()
-      .from(columns)
-      .where(eq(columns.boardId, board.id))
-      .orderBy(asc(columns.position))
-      .all();
-
-    // Get cards for this board (exclude archived cards)
-    const boardCards = db
-      .select()
-      .from(cards)
-      .where(and(eq(cards.boardId, board.id), isNull(cards.archivedAt)))
-      .all();
-
-    // Get comments for all cards
-    // BOLT OPTIMIZATION: Use database-level filtering with inArray instead of fetching all and filtering in-memory
-    const cardIds = boardCards.map((c) => c.id);
-    const allComments = cardIds.length > 0
-      ? db.select().from(comments).where(inArray(comments.cardId, cardIds)).all()
-      : [];
-
-    // Get card tags
-    // BOLT OPTIMIZATION: Use database-level filtering with inArray instead of fetching all and filtering in-memory
-    const allCardTags = cardIds.length > 0
-      ? db.select().from(cardTags).where(inArray(cardTags.cardId, cardIds)).all()
-      : [];
-
-    // Get all tags
-    const allTags = db.select().from(tags).all();
-    const tagMap = new Map(allTags.map((t) => [t.id, t]));
-
-    // Transform the data to match our client-side format
-    const transformedBoard = {
-      columns: boardColumns.map((col) => ({
-        id: col.id,
-        title: col.title,
-        cardIds: JSON.parse(col.cardIds),
-      })),
-      cards: boardCards.reduce((acc, card) => {
-        const cardComments = allComments.filter((c) => c.cardId === card.id);
-        const cardTagRelations = allCardTags.filter((ct) => ct.cardId === card.id);
-        const cardTagList = cardTagRelations
-          .map((ct) => tagMap.get(ct.tagId))
-          .filter((t): t is NonNullable<typeof t> => t !== undefined);
-
-        acc[card.id] = {
-          id: card.id,
-          title: card.title,
-          notes: card.notes,
-          generatedPrompt: card.generatedPrompt || undefined,
-          dueDate: card.dueDate ? card.dueDate.toISOString() : undefined,
-          priority: card.priority,
-          comments: cardComments.map((comment) => ({
-            id: comment.id,
-            content: comment.content,
-            cardId: comment.cardId,
-            createdAt: comment.createdAt.toISOString(),
-            updatedAt: comment.updatedAt.toISOString(),
-          })),
-          tags: cardTagList.map((tag) => ({
-            id: tag.id,
-            name: tag.name,
-            color: tag.color,
-            createdAt: tag.createdAt.toISOString(),
-            updatedAt: tag.updatedAt.toISOString(),
-          })),
-          createdAt: card.createdAt.toISOString(),
-          updatedAt: card.updatedAt.toISOString(),
-        };
-        return acc;
-      }, {} as Record<string, any>),
-    };
-
-    return new Response(JSON.stringify(transformedBoard), {
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (error) {
-    console.error("Error fetching board:", error);
-    return new Response(
-      JSON.stringify({ error: "Failed to fetch board" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
   }
-}
+  const referenced = submittedCardIds.size
+    ? db.select({ id: cards.id, boardId: cards.boardId }).from(cards).where(inArray(cards.id, [...submittedCardIds])).all()
+    : [];
+  if (referenced.some((c) => c.boardId !== board.id)) return jsonError("Card access denied", 403);
 
-// PUT /api/board - Update the entire board structure (for drag and drop)
-export async function action({ request }: { request: Request }) {
-  if (request.method !== "PUT") {
-    return new Response("Method not allowed", { status: 405 });
+  // Collaboration safety: if a collaborator added a card the client hasn't seen yet,
+  // keep it in its current column instead of silently dropping it.
+  const afterLayout = (newColumns as { id: string; cardIds: string[] }[]).map((c) => ({
+    id: c.id,
+    cardIds: c.cardIds.filter((id, i, arr) => arr.indexOf(id) === i),
+  }));
+  for (const before of beforeLayout) {
+    const missing = before.cardIds.filter((id) => !submittedCardIds.has(id));
+    if (missing.length) {
+      const target = afterLayout.find((c) => c.id === before.id);
+      if (target) target.cardIds.push(...missing);
+    }
   }
 
-  try {
-    const session = await getSession(request);
+  const now = new Date();
+  afterLayout.forEach((col, i) => {
+    db.update(columns)
+      .set({ cardIds: JSON.stringify(col.cardIds), position: i, updatedAt: now })
+      .where(and(eq(columns.id, col.id), eq(columns.boardId, board.id)))
+      .run();
+  });
 
-    if (!session.userId) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+  // Audit + notify on cards that changed column
+  const moves = detectCardMoves(beforeLayout, afterLayout);
+  if (moves.length) {
+    const movedCards = db.select().from(cards).where(inArray(cards.id, moves.map((m) => m.cardId))).all();
+    const cardMap = new Map(movedCards.map((c) => [c.id, c]));
+    for (const move of moves) {
+      const card = cardMap.get(move.cardId);
+      if (!card) continue;
+      const from = existingById.get(move.fromColumnId)?.title ?? "?";
+      const to = existingById.get(move.toColumnId)?.title ?? "?";
+      logAudit({
+        actor: user,
+        action: "card.moved",
+        entityType: "card",
+        entityId: card.id,
+        boardId: board.id,
+        summary: `Moved "${card.title}" from ${from} to ${to}`,
+        metadata: { fromColumnId: move.fromColumnId, toColumnId: move.toColumnId, from, to },
+        request,
+      });
+      notifyCardMoved(card, from, to, user);
     }
-
-    const board = getUserBoard(session.userId);
-    if (!board) {
-      return new Response(
-        JSON.stringify({ error: "Board not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const { columns: newColumns } = await request.json();
-
-    // Validate input
-    if (!Array.isArray(newColumns)) {
-      return new Response(
-        JSON.stringify({ error: "Invalid request format" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // SECURITY FIX: Verify all columns belong to user's board before updating
-    for (let i = 0; i < newColumns.length; i++) {
-      const col = newColumns[i];
-
-      // Validate column structure
-      if (!col.id || !Array.isArray(col.cardIds)) {
-        return new Response(
-          JSON.stringify({ error: "Invalid column format" }),
-          { status: 400, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      // Verify column belongs to user's board
-      const existingColumn = db.select()
-        .from(columns)
-        .where(and(eq(columns.id, col.id), eq(columns.boardId, board.id)))
-        .get();
-
-      if (!existingColumn) {
-        return new Response(
-          JSON.stringify({ error: "Column not found or access denied" }),
-          { status: 403, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      // Validate cardIds are strings and belong to user's board
-      for (const cardId of col.cardIds) {
-        if (typeof cardId !== "string") {
-          return new Response(
-            JSON.stringify({ error: "Invalid card ID format" }),
-            { status: 400, headers: { "Content-Type": "application/json" } }
-          );
-        }
-        const card = db.select().from(cards).where(eq(cards.id, cardId)).get();
-        if (card && card.boardId !== board.id) {
-          return new Response(
-            JSON.stringify({ error: "Card access denied" }),
-            { status: 403, headers: { "Content-Type": "application/json" } }
-          );
-        }
-      }
-
-      db.update(columns)
-        .set({
-          cardIds: JSON.stringify(col.cardIds),
-          position: i,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(columns.id, col.id), eq(columns.boardId, board.id)))
-        .run();
-    }
-
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (error) {
-    console.error("Error updating board:", error);
-    return new Response(
-      JSON.stringify({ error: "Failed to update board" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
   }
-}
+
+  return json({ success: true });
+});

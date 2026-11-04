@@ -1,71 +1,47 @@
 import { db } from "~/lib/db";
 import { columns, cards, cardTags, comments } from "~/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
-import { getSession, getUserBoard } from "~/lib/auth";
+import { api, requireColumnAccess, requireUser } from "~/lib/access.server";
+import { json, jsonError } from "~/lib/http";
+import { logAudit } from "~/lib/audit.server";
 
-// DELETE /api/columns/:columnId - Delete a column
-export async function action({ request, params }: { request: Request; params: { columnId: string } }) {
-  if (request.method !== "DELETE") {
-    return new Response("Method not allowed", { status: 405 });
-  }
+// DELETE /api/columns/:columnId - Delete a column (board owner only)
+export const action = api(
+  "delete column",
+  async ({ request, params }: { request: Request; params: { columnId: string } }) => {
+    if (request.method !== "DELETE") return jsonError("Method not allowed", 405);
+    if (!params.columnId) return jsonError("Column ID is required", 400);
 
-  const { columnId } = params;
+    const user = await requireUser(request);
+    const { column, role } = requireColumnAccess(user, params.columnId);
+    if (role !== "owner") return jsonError("Only the board owner can delete columns", 403);
 
-  if (!columnId) {
-    return new Response(
-      JSON.stringify({ error: "Column ID is required" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
-  }
-
-  try {
-    const session = await getSession(request);
-    if (!session.userId) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const board = getUserBoard(session.userId);
-    if (!board) {
-      return new Response(
-        JSON.stringify({ error: "Board not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Get the column
-    const column = db.select().from(columns).where(eq(columns.id, columnId)).get();
-
-    if (!column || column.boardId !== board.id) {
-      return new Response(
-        JSON.stringify({ error: "Column not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Delete all cards in this column
     const cardIdsList = JSON.parse(column.cardIds) as string[];
+    const deletedTitles = cardIdsList.length
+      ? db.select({ title: cards.title }).from(cards).where(inArray(cards.id, cardIdsList)).all().map((c) => c.title)
+      : [];
 
-    if (cardIdsList.length > 0) {
-      // BOLT OPTIMIZATION: Use batch deletion with inArray to avoid N individual database calls
-      db.delete(cardTags).where(inArray(cardTags.cardId, cardIdsList)).run();
-      db.delete(comments).where(inArray(comments.cardId, cardIdsList)).run();
-      db.delete(cards).where(inArray(cards.id, cardIdsList)).run();
-    }
-
-    // Delete the column
-    db.delete(columns).where(eq(columns.id, columnId)).run();
-
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { "Content-Type": "application/json" },
+    db.transaction((tx) => {
+      if (cardIdsList.length > 0) {
+        // BOLT OPTIMIZATION: Use batch deletion with inArray to avoid N individual database calls
+        tx.delete(cardTags).where(inArray(cardTags.cardId, cardIdsList)).run();
+        tx.delete(comments).where(inArray(comments.cardId, cardIdsList)).run();
+        tx.delete(cards).where(inArray(cards.id, cardIdsList)).run();
+      }
+      tx.delete(columns).where(eq(columns.id, column.id)).run();
     });
-  } catch (error) {
-    console.error("Error deleting column:", error);
-    return new Response(
-      JSON.stringify({ error: "Failed to delete column" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+
+    logAudit({
+      actor: user,
+      action: "column.deleted",
+      entityType: "column",
+      entityId: column.id,
+      boardId: column.boardId,
+      summary: `Deleted column "${column.title}"${deletedTitles.length ? ` and ${deletedTitles.length} card(s)` : ""}`,
+      metadata: { deletedCards: deletedTitles },
+      request,
+    });
+
+    return json({ success: true });
   }
-}
+);

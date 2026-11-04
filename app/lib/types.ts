@@ -1,7 +1,51 @@
+export interface UserSummary {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export type UserRole = 'admin' | 'member';
+
+export interface CurrentUser extends UserSummary {
+  role: UserRole;
+  emailNotifications: boolean;
+}
+
+export interface BoardMember extends UserSummary {
+  boardRole: 'owner' | 'member';
+}
+
+export interface BoardInfo {
+  id: string;
+  name: string;
+  role: 'owner' | 'member';
+}
+
+export interface BoardListItem {
+  id: string;
+  name: string;
+  role: 'owner' | 'member';
+  ownerName: string | null;
+}
+
+export interface ActivityEntry {
+  id: string;
+  actorId: string | null;
+  actorEmail: string | null;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  boardId: string | null;
+  summary: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface Comment {
   id: string;
   content: string;
   cardId: string;
+  author?: UserSummary | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -24,8 +68,18 @@ export interface KanbanCard {
   comments?: Comment[];
   tags?: Tag[];
   archivedAt?: string;
+  boardId?: string;
+  assigneeId?: string | null;
+  assignee?: UserSummary | null;
+  createdBy?: UserSummary | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AssignedCard extends KanbanCard {
+  boardId: string;
+  boardName: string;
+  columnTitle: string | null;
 }
 
 export interface KanbanColumn {
@@ -35,6 +89,8 @@ export interface KanbanColumn {
 }
 
 export interface KanbanBoard {
+  board?: BoardInfo;
+  members?: BoardMember[];
   columns: KanbanColumn[];
   cards: Record<string, KanbanCard>;
 }

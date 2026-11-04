@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -16,17 +16,46 @@ import { CardDialog } from "./CardDialog";
 import { ColumnDialog } from "./ColumnDialog";
 import { PromptDialog } from "./PromptDialog";
 import { ArchivedCardsDialog } from "./ArchivedCardsDialog";
+import { BoardMembersDialog } from "./BoardMembersDialog";
+import { UserAvatar } from "./UserAvatar";
 import { Button } from "./ui/button";
-import { Archive } from "lucide-react";
-import {
+import { Archive, Users } from "lucide-react";
+import type {
   KanbanCard as KanbanCardType,
-  KanbanColumn as KanbanColumnType,
   KanbanBoard as KanbanBoardType,
+  BoardMember,
+  CurrentUser,
 } from "~/lib/types";
 import { apiFetch } from "~/lib/api";
 
-export function KanbanBoard() {
+type AssigneeFilter = "all" | "mine" | "unassigned";
+
+const REFRESH_INTERVAL_MS = 30_000;
+
+interface KanbanBoardProps {
+  /** Board to show; defaults to the current user's own board */
+  boardId?: string | null;
+  currentUser?: CurrentUser;
+  /** Card to open on load (e.g. from an email link) */
+  openCardId?: string | null;
+  onOpenCardHandled?: () => void;
+  /** Called when the user leaves a shared board */
+  onLeftBoard?: () => void;
+  /** Called after the board loads (name, role) */
+  onBoardLoaded?: (info: { id: string; name: string; role: "owner" | "member" }) => void;
+}
+
+export function KanbanBoard({
+  boardId,
+  currentUser,
+  openCardId,
+  onOpenCardHandled,
+  onLeftBoard,
+  onBoardLoaded,
+}: KanbanBoardProps = {}) {
   const [board, setBoard] = useState<KanbanBoardType>({ columns: [], cards: {} });
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("all");
+  const [isMembersDialogOpen, setIsMembersDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeCard, setActiveCard] = useState<KanbanCardType | null>(null);
   const [isCardDialogOpen, setIsCardDialogOpen] = useState(false);
@@ -52,15 +81,59 @@ export function KanbanBoard() {
     })
   );
 
-  // Load board from database on mount
+  const boardQuery = boardId ? `?boardId=${encodeURIComponent(boardId)}` : "";
+  const resolvedBoardId = board.board?.id ?? boardId ?? undefined;
+  const isOwner = !board.board || board.board.role === "owner";
+  const members: BoardMember[] = board.members ?? [];
+  const isShared = members.length > 1;
+
+  // Load board from database on mount / when switching boards
   useEffect(() => {
+    setLoading(true);
+    setAssigneeFilter("all");
     fetchBoard();
     fetchArchivedCount();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId]);
+
+  // Open a specific card once the board has loaded (deep link from email)
+  useEffect(() => {
+    if (!openCardId || loading) return;
+    const card = board.cards[openCardId];
+    if (card) handleEditCard(card);
+    onOpenCardHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openCardId, loading]);
+
+  // Keep shared boards fresh: poll while the tab is visible and nothing is being edited
+  const busyRef = useRef(false);
+  busyRef.current = isCardDialogOpen || isColumnDialogOpen || isArchivedDialogOpen || isMembersDialogOpen || !!activeCard;
+  const refresh = useCallback(() => {
+    if (!busyRef.current && document.visibilityState === "visible") fetchBoard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId]);
+  useEffect(() => {
+    if (!isShared) return;
+    const id = window.setInterval(refresh, REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [isShared, refresh]);
+
+  const saveColumns = (newColumns: KanbanBoardType["columns"]) =>
+    apiFetch("/api/board", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        resolvedBoardId ? { boardId: resolvedBoardId, columns: newColumns } : { columns: newColumns }
+      ),
+    });
 
   const fetchArchivedCount = async () => {
     try {
-      const response = await apiFetch("/api/archived-cards");
+      const response = await apiFetch(`/api/archived-cards${boardQuery}`);
       if (response.ok) {
         const data = await response.json();
         setArchivedCount(data.length);
@@ -72,10 +145,11 @@ export function KanbanBoard() {
 
   const fetchBoard = async () => {
     try {
-      const response = await apiFetch("/api/board");
+      const response = await apiFetch(`/api/board${boardQuery}`);
       if (response.ok) {
         const data = await response.json();
         setBoard(data);
+        if (data.board) onBoardLoaded?.(data.board);
       } else {
         console.error("Failed to fetch board");
       }
@@ -134,11 +208,7 @@ export function KanbanBoard() {
         }));
 
         // Save to database
-        await apiFetch("/api/board", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ columns: newColumns }),
-        });
+        await saveColumns(newColumns);
       }
     } else {
       // Moving to a different column
@@ -167,11 +237,7 @@ export function KanbanBoard() {
       }));
 
       // Save to database
-      await apiFetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ columns: newColumns }),
-      });
+      await saveColumns(newColumns);
 
       // Trigger confetti if card is moved to completed column (check by title)
       console.log(`Move detected: from "${activeColumn.title}" to "${overColumn.title}"`);
@@ -234,11 +300,7 @@ export function KanbanBoard() {
     setTargetColumnId(newColumnId);
 
     // Save to database
-    await apiFetch("/api/board", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columns: newColumns }),
-    });
+    await saveColumns(newColumns);
 
     // Trigger confetti if card is moved to completed column
     if (destColumn.title.toLowerCase() === "completed" && sourceColumn.title.toLowerCase() !== "completed") {
@@ -257,6 +319,7 @@ export function KanbanBoard() {
     dueDate?: string;
     priority: 'low' | 'medium' | 'high';
     tagIds: string[];
+    assigneeId?: string | null;
   }) => {
     if (editingCard) {
       // Update existing card
@@ -270,6 +333,7 @@ export function KanbanBoard() {
             dueDate: data.dueDate,
             priority: data.priority,
             tagIds: data.tagIds,
+            ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId }),
           }),
         });
 
@@ -293,6 +357,7 @@ export function KanbanBoard() {
             priority: data.priority,
             tagIds: data.tagIds,
             columnId: targetColumnId,
+            ...(data.assigneeId && { assigneeId: data.assigneeId }),
           }),
         });
 
@@ -359,7 +424,7 @@ export function KanbanBoard() {
       const response = await apiFetch("/api/columns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify(resolvedBoardId ? { title, boardId: resolvedBoardId } : { title }),
       });
 
       if (response.ok) {
@@ -478,13 +543,51 @@ export function KanbanBoard() {
   return (
     <div className="flex-1">
       <div className="container mx-auto px-4 py-6">
-        <div className="flex items-center justify-between mb-4 sm:mb-6">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 sm:mb-6">
+          <div className="min-w-0">
+            {board.board && (
+              <h2 className="text-lg font-semibold text-foreground truncate" data-testid="board-name">
+                {board.board.name}
+                {!isOwner && (
+                  <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">shared with you</span>
+                )}
+              </h2>
+            )}
             <p className="hidden sm:block text-muted-foreground">
               Organize your projects with style
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {members.length > 0 && (
+              <div className="flex items-center gap-2">
+                {isShared && (
+                  <div className="hidden sm:flex -space-x-2" aria-label="Board members">
+                    {members.slice(0, 5).map((m) => (
+                      <UserAvatar key={m.id} user={m} />
+                    ))}
+                    {members.length > 5 && (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] ring-2 ring-card">
+                        +{members.length - 5}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <select
+                  aria-label="Filter by assignee"
+                  value={assigneeFilter}
+                  onChange={(e) => setAssigneeFilter(e.target.value as AssigneeFilter)}
+                  className="h-9 px-2 border-2 border-border rounded-md bg-card text-foreground text-sm"
+                >
+                  <option value="all">All cards</option>
+                  <option value="mine">Assigned to me</option>
+                  <option value="unassigned">Unassigned</option>
+                </select>
+                <Button variant="outline" onClick={() => setIsMembersDialogOpen(true)}>
+                  <Users className="h-4 w-4 mr-2" />
+                  {isOwner ? "Share" : "Members"}
+                </Button>
+              </div>
+            )}
             <Button
               variant="outline"
               onClick={() => setIsArchivedDialogOpen(true)}
@@ -532,13 +635,20 @@ export function KanbanBoard() {
                 column={column}
                 cards={column.cardIds
                   .map((id) => board.cards[id])
-                  .filter(Boolean)}
+                  .filter(Boolean)
+                  .filter((card) =>
+                    assigneeFilter === "all"
+                      ? true
+                      : assigneeFilter === "mine"
+                        ? card.assigneeId === currentUser?.id
+                        : !card.assigneeId
+                  )}
                 onAddCard={handleAddCard}
                 onEditCard={handleEditCard}
                 onDeleteCard={handleDeleteCard}
                 onGeneratePrompt={handleGeneratePrompt}
                 onDeleteColumn={handleDeleteColumn}
-                isDeletable={!defaultColumnTitles.includes(column.title.toLowerCase())}
+                isDeletable={isOwner && !defaultColumnTitles.includes(column.title.toLowerCase())}
               />
             ))}
           </div>
@@ -567,6 +677,8 @@ export function KanbanBoard() {
         columns={board.columns}
         currentColumnId={targetColumnId || undefined}
         onColumnChange={handleColumnChange}
+        members={board.members}
+        currentUserId={currentUser?.id}
       />
 
       <ColumnDialog
@@ -587,11 +699,30 @@ export function KanbanBoard() {
         open={isArchivedDialogOpen}
         onOpenChange={setIsArchivedDialogOpen}
         columns={board.columns}
+        boardId={resolvedBoardId}
+        canDelete={isOwner}
         onCardRestored={() => {
           fetchBoard();
           fetchArchivedCount();
         }}
       />
+
+      {board.board && currentUser && (
+        <BoardMembersDialog
+          open={isMembersDialogOpen}
+          onOpenChange={setIsMembersDialogOpen}
+          boardId={board.board.id}
+          boardName={board.board.name}
+          isOwner={isOwner}
+          currentUserId={currentUser.id}
+          members={members}
+          onMembersChange={(next) => {
+            setBoard((prev) => ({ ...prev, members: next }));
+            fetchBoard();
+          }}
+          onLeft={onLeftBoard}
+        />
+      )}
     </div>
   );
 }

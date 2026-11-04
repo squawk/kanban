@@ -10,6 +10,18 @@ A modern kanban board application built with React Router 7, Tailwind CSS, and s
 - **TypeScript**: Full type safety throughout the application
 - **Vite**: Lightning-fast development experience
 
+## Teams, Roles & Admin
+
+- **Roles**: users are `admin` or `member`. Addresses in `ADMIN_EMAIL` are bootstrapped as admins; admins can promote or demote others from **Admin → Users** (the last active admin can't be removed).
+- **Sign-up policy** (**Admin → Sign-up**): open, restricted to specific email domains, or invite only (closed). Optionally require admin approval for new sign-ups.
+- **Invitations** (**Admin → Invitations**): admins invite people by email with a role. Invite links are single-use, expire after 7 days, and can be revoked or re-sent. If email isn't configured, the admin gets a copyable link instead.
+- **User management**: approve or reject pending sign-ups, disable accounts (signs them out immediately), or delete them.
+- **Shared boards & assignment**: board owners share their board with other users from the **Share** button. Anyone on a board can assign cards to board members, filter by "Assigned to me" or "Unassigned", and see everything assigned to them across boards in **My Tasks**.
+- **Audit trail**: sign-ins, admin actions, sharing, and every card change (field-level diffs, moves, assignments, comments) are recorded. Admins can search, filter, and export the log as CSV; board members see a card's history under **Show activity**.
+- **Email notifications** (SendGrid): when you're assigned a card, when someone comments on or moves a card you created or are assigned to, and when a board is shared with you. Users can turn these off from the account menu (click your avatar).
+
+See `.env.example` for the related environment variables.
+
 ## Getting Started
 
 ### Prerequisites

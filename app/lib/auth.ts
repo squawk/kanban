@@ -5,6 +5,7 @@ import { db } from "./db";
 import { users, boards, columns, tags, emailVerificationTokens, passwordResetTokens } from "./db/schema";
 import { eq, and, gt } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { isBootstrapAdminEmail } from "./config";
 
 const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY;
 
@@ -84,6 +85,7 @@ export async function createUser(email: string, password: string, name: string) 
     name,
     emailVerified: false,
     approved: false,
+    role: isBootstrapAdminEmail(email) ? "admin" : "member",
     createdAt: now,
     updatedAt: now,
   }).run();
@@ -126,6 +128,10 @@ export function findUserById(id: string) {
     id: users.id,
     email: users.email,
     name: users.name,
+    role: users.role,
+    emailNotifications: users.emailNotifications,
+    disabled: users.disabled,
+    approved: users.approved,
     createdAt: users.createdAt,
   }).from(users).where(eq(users.id, id)).get();
 }
@@ -133,6 +139,12 @@ export function findUserById(id: string) {
 // Get user's board
 export function getUserBoard(userId: string) {
   return db.select().from(boards).where(eq(boards.userId, userId)).get();
+}
+
+// True if the user exists, is approved, and isn't disabled
+export function isActiveUser(userId: string): boolean {
+  const u = db.select({ approved: users.approved, disabled: users.disabled }).from(users).where(eq(users.id, userId)).get();
+  return !!u && u.approved && !u.disabled;
 }
 
 // Check if user is authenticated
@@ -324,6 +336,17 @@ export function createUserBoard(userId: string) {
 // Get full user record including verification status
 export function getFullUser(userId: string) {
   return db.select().from(users).where(eq(users.id, userId)).get();
+}
+
+// Emails of all active admins (falls back to ADMIN_EMAIL config when none exist yet)
+export function getAdminRecipientEmails(): string[] {
+  const admins = db
+    .select({ email: users.email })
+    .from(users)
+    .where(and(eq(users.role, "admin"), eq(users.disabled, false)))
+    .all()
+    .map((u) => u.email);
+  return admins;
 }
 
 // Delete user and all associated data

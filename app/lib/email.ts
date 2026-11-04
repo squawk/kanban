@@ -1,22 +1,22 @@
 import sgMail from "@sendgrid/mail";
 import { generateApprovalToken } from "~/routes/api.auth.approve";
+import { getAdminEmails, getAppUrl } from "~/lib/config";
 
 // Initialize SendGrid with API key
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@example.com";
-const APP_URL = process.env.APP_URL || "http://localhost:5173";
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "brad@vanskyhawk.com";
+const APP_URL = getAppUrl();
 
 if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);
 }
 
-function isEmailConfigured(): boolean {
+export function isEmailConfigured(): boolean {
   return !!SENDGRID_API_KEY;
 }
 
 // Escape HTML to prevent XSS in emails
-function escapeHtml(unsafe: string): string {
+export function escapeHtml(unsafe: string): string {
   return unsafe
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -25,22 +25,99 @@ function escapeHtml(unsafe: string): string {
     .replace(/'/g, "&#039;");
 }
 
+export interface EmailMessage {
+  to: string | string[];
+  subject: string;
+  text: string;
+  html: string;
+}
+
+/**
+ * Send an email via SendGrid. When SendGrid isn't configured, the message is
+ * logged in development (so links such as invitations can still be tested) and
+ * skipped in production. Never throws.
+ */
+export async function sendEmail(msg: EmailMessage): Promise<boolean> {
+  if (!isEmailConfigured()) {
+    if (process.env.NODE_ENV !== "production") {
+      console.info(`[email:dev] To: ${[msg.to].flat().join(", ")}\nSubject: ${msg.subject}\n${msg.text}\n`);
+    } else {
+      console.warn(`SendGrid not configured, skipping email: ${msg.subject}`);
+    }
+    return false;
+  }
+  try {
+    await sgMail.send({ ...msg, from: FROM_EMAIL });
+    return true;
+  } catch (error) {
+    console.error(`Error sending email "${msg.subject}":`, error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
+/** Shared HTML layout for transactional emails. `bodyHtml` must already be escaped. */
+export function emailLayout(opts: {
+  heading: string;
+  bodyHtml: string;
+  cta?: { label: string; url: string };
+  footer?: string;
+}): string {
+  const button = opts.cta
+    ? `<p style="margin: 30px 0;">
+          <a href="${opts.cta.url}"
+             style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+            ${escapeHtml(opts.cta.label)}
+          </a>
+        </p>`
+    : "";
+  const footer = opts.footer
+    ? `<p style="color: #666; font-size: 12px; margin-top: 32px;">${escapeHtml(opts.footer)}</p>`
+    : "";
+  return `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #333;">${escapeHtml(opts.heading)}</h2>
+        ${opts.bodyHtml}
+        ${button}
+        ${footer}
+      </div>
+    `;
+}
+
+export const NOTIFICATION_FOOTER =
+  "You're receiving this because email notifications are on for your Kanban Board account. You can turn them off from the account menu.";
+
+export async function sendInvitationEmail(opts: {
+  email: string;
+  inviterName: string;
+  token: string;
+  expiresAt: Date;
+}): Promise<boolean> {
+  const url = `${APP_URL}/accept-invite?token=${opts.token}`;
+  const expires = opts.expiresAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  return sendEmail({
+    to: opts.email,
+    subject: `${opts.inviterName} invited you to Kanban Board`,
+    text: `${opts.inviterName} invited you to join Kanban Board.\n\nAccept the invitation and set your password:\n${url}\n\nThis invitation expires on ${expires}.`,
+    html: emailLayout({
+      heading: "You're invited",
+      bodyHtml: `<p><strong>${escapeHtml(opts.inviterName)}</strong> invited you to join Kanban Board.</p>
+        <p>Click below to choose your name and password.</p>`,
+      cta: { label: "Accept Invitation", url },
+      footer: `This invitation expires on ${expires}. If you weren't expecting it, you can ignore this email.`,
+    }),
+  });
+}
+
 export async function sendVerificationEmail(
   email: string,
   name: string,
   token: string
 ): Promise<boolean> {
-  if (!isEmailConfigured()) {
-    console.warn("SendGrid not configured, skipping verification email");
-    return false;
-  }
-
   const safeName = escapeHtml(name);
   const verificationUrl = `${APP_URL}/verify-email?token=${token}`;
 
   const msg = {
     to: email,
-    from: FROM_EMAIL,
     subject: "Verify your email - Kanban Board",
     text: `Hi ${name},\n\nPlease verify your email by clicking the link below:\n\n${verificationUrl}\n\nThis link will expire in 24 hours.\n\nIf you didn't create an account, you can ignore this email.`,
     html: `
@@ -60,13 +137,7 @@ export async function sendVerificationEmail(
     `,
   };
 
-  try {
-    await sgMail.send(msg);
-    return true;
-  } catch (error) {
-    console.error("Error sending verification email:", error);
-    return false;
-  }
+  return sendEmail(msg);
 }
 
 export async function sendPasswordResetEmail(
@@ -74,17 +145,11 @@ export async function sendPasswordResetEmail(
   name: string,
   token: string
 ): Promise<boolean> {
-  if (!isEmailConfigured()) {
-    console.warn("SendGrid not configured, skipping password reset email");
-    return false;
-  }
-
   const safeName = escapeHtml(name);
   const resetUrl = `${APP_URL}/reset-password?token=${token}`;
 
   const msg = {
     to: email,
-    from: FROM_EMAIL,
     subject: "Reset your password - Kanban Board",
     text: `Hi ${name},\n\nYou requested to reset your password. Click the link below:\n\n${resetUrl}\n\nThis link will expire in 1 hour.\n\nIf you didn't request this, you can ignore this email.`,
     html: `
@@ -104,25 +169,15 @@ export async function sendPasswordResetEmail(
     `,
   };
 
-  try {
-    await sgMail.send(msg);
-    return true;
-  } catch (error) {
-    console.error("Error sending password reset email:", error);
-    return false;
-  }
+  return sendEmail(msg);
 }
 
 export async function sendAdminApprovalEmail(
   userId: string,
   userEmail: string,
-  userName: string
+  userName: string,
+  adminRecipients?: string[]
 ): Promise<boolean> {
-  if (!isEmailConfigured()) {
-    console.warn("SendGrid not configured, skipping admin approval email");
-    return false;
-  }
-
   const safeName = escapeHtml(userName);
   const safeEmail = escapeHtml(userEmail);
 
@@ -130,12 +185,13 @@ export async function sendAdminApprovalEmail(
   const approveToken = generateApprovalToken(userId, "approve");
   const rejectToken = generateApprovalToken(userId, "reject");
 
+  const recipients = adminRecipients && adminRecipients.length > 0 ? adminRecipients : getAdminEmails();
+
   const approveUrl = `${APP_URL}/api/auth/approve?userId=${userId}&action=approve&token=${approveToken}`;
   const rejectUrl = `${APP_URL}/api/auth/approve?userId=${userId}&action=reject&token=${rejectToken}`;
 
   const msg = {
-    to: ADMIN_EMAIL,
-    from: FROM_EMAIL,
+    to: recipients,
     subject: `New user registration pending approval - ${userName}`,
     text: `A new user has registered and is awaiting approval:\n\nName: ${userName}\nEmail: ${userEmail}\n\nApprove: ${approveUrl}\nReject: ${rejectUrl}`,
     html: `
@@ -156,17 +212,12 @@ export async function sendAdminApprovalEmail(
             Reject
           </a>
         </p>
+        <p style="color: #666; font-size: 14px;">You can also manage pending users from the Admin page: ${APP_URL}/admin</p>
       </div>
     `,
   };
 
-  try {
-    await sgMail.send(msg);
-    return true;
-  } catch (error) {
-    console.error("Error sending admin approval email:", error);
-    return false;
-  }
+  return sendEmail(msg);
 }
 
 export async function sendApprovalNotificationEmail(
@@ -174,17 +225,11 @@ export async function sendApprovalNotificationEmail(
   name: string,
   approved: boolean
 ): Promise<boolean> {
-  if (!isEmailConfigured()) {
-    console.warn("SendGrid not configured, skipping approval notification email");
-    return false;
-  }
-
   const safeName = escapeHtml(name);
   const loginUrl = `${APP_URL}/login`;
 
   const msg = {
     to: email,
-    from: FROM_EMAIL,
     subject: approved
       ? "Your account has been approved - Kanban Board"
       : "Your account registration update - Kanban Board",
@@ -215,11 +260,5 @@ export async function sendApprovalNotificationEmail(
       `,
   };
 
-  try {
-    await sgMail.send(msg);
-    return true;
-  } catch (error) {
-    console.error("Error sending approval notification email:", error);
-    return false;
-  }
+  return sendEmail(msg);
 }

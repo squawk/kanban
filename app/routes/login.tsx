@@ -33,6 +33,33 @@ export default function LoginPage() {
   const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
   const recaptchaRef = useRef<HTMLDivElement>(null);
   const recaptchaWidgetId = useRef<number | null>(null);
+  const [signupConfig, setSignupConfig] = useState<{
+    mode: "open" | "domain" | "invite_only";
+    allowedDomains: string[];
+  } | null>(null);
+
+  // Find out whether self sign-up is open, domain-restricted, or invite-only
+  useEffect(() => {
+    // Promise.resolve().then(...) keeps a missing/mocked fetch from throwing synchronously
+    Promise.resolve()
+      .then(() => fetch("/api/auth/signup-config"))
+      .then((res) => (res?.ok ? res.json() : null))
+      .then((data) => {
+        if (data && typeof data.mode === "string") setSignupConfig(data);
+      })
+      .catch(() => {});
+  }, []);
+
+  const signupClosed = signupConfig?.mode === "invite_only";
+  const domainHint =
+    signupConfig?.mode === "domain" && signupConfig.allowedDomains.length > 0
+      ? `Use your ${signupConfig.allowedDomains.map((d) => `@${d}`).join(" or ")} email address.`
+      : null;
+
+  // If sign-up closes while the form is open, fall back to sign-in
+  useEffect(() => {
+    if (signupClosed && !isLogin) setIsLogin(true);
+  }, [signupClosed, isLogin]);
 
   // Check for session expired message
   const sessionExpired = searchParams.get("session") === "expired";
@@ -200,6 +227,9 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
+              {!isLogin && domainHint && (
+                <p className="text-xs text-muted-foreground">{domainHint}</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -289,6 +319,11 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-6 text-center">
+            {signupClosed ? (
+              <p className="text-sm text-muted-foreground">
+                New accounts are by invitation only. Ask an administrator to invite you.
+              </p>
+            ) : (
             <button
               type="button"
               onClick={() => {
@@ -304,6 +339,7 @@ export default function LoginPage() {
                 ? "Don't have an account? Sign up"
                 : "Already have an account? Sign in"}
             </button>
+            )}
           </div>
         </div>
 

@@ -1,14 +1,14 @@
 import { db } from "~/lib/db";
 import { templates } from "~/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
-import { getSession } from "~/lib/auth";
+import { getSession, isActiveUser } from "~/lib/auth";
 import { nanoid } from "nanoid";
 
 // GET /api/templates - Get all templates
 export async function loader({ request }: { request: Request }) {
   try {
     const session = await getSession(request);
-    if (!session.userId) {
+    if (!session.userId || !isActiveUser(session.userId)) {
       return new Response(
         JSON.stringify({ error: "Unauthorized" }),
         { status: 401, headers: { "Content-Type": "application/json" } }
@@ -45,7 +45,7 @@ export async function action({ request }: { request: Request }) {
 
   try {
     const session = await getSession(request);
-    if (!session.userId) {
+    if (!session.userId || !isActiveUser(session.userId)) {
       return new Response(
         JSON.stringify({ error: "Unauthorized" }),
         { status: 401, headers: { "Content-Type": "application/json" } }

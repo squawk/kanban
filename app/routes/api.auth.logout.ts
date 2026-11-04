@@ -1,4 +1,5 @@
 import { getSessionWithResponse } from "~/lib/auth";
+import { logAudit } from "~/lib/audit.server";
 
 export async function action({ request }: { request: Request }) {
   if (request.method !== "POST") {
@@ -12,6 +13,16 @@ export async function action({ request }: { request: Request }) {
     );
 
     const session = await getSessionWithResponse(request, response);
+    if (session.userId) {
+      logAudit({
+        actor: { id: session.userId, email: session.email ?? "" },
+        action: "auth.logout",
+        entityType: "auth",
+        entityId: session.userId,
+        summary: `${session.email ?? session.userId} signed out`,
+        request,
+      });
+    }
     session.destroy();
 
     return response;

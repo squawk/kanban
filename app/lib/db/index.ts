@@ -15,6 +15,7 @@ if (!fs.existsSync(dbDir)) {
 }
 
 const sqlite = new Database(dbPath);
+sqlite.pragma("foreign_keys = ON");
 
 // Enable WAL mode for better performance
 sqlite.pragma("journal_mode = WAL");
@@ -116,6 +117,52 @@ export function initializeDatabase() {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS board_members (
+      board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      added_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (board_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS invitations (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      token_hash TEXT NOT NULL UNIQUE,
+      invited_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      expires_at INTEGER NOT NULL,
+      accepted_at INTEGER,
+      revoked_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      actor_id TEXT,
+      actor_email TEXT,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT,
+      board_id TEXT,
+      summary TEXT NOT NULL DEFAULT '',
+      metadata TEXT NOT NULL DEFAULT '{}',
+      ip_address TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_board_members_user_id ON board_members(user_id);
+    CREATE INDEX IF NOT EXISTS idx_invitations_email ON invitations(email);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_board_id ON audit_logs(board_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_id ON audit_logs(actor_id);
     CREATE INDEX IF NOT EXISTS idx_boards_user_id ON boards(user_id);
     CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
     CREATE INDEX IF NOT EXISTS idx_cards_board_id ON cards(board_id);
@@ -146,6 +193,33 @@ export function initializeDatabase() {
     sqlite.exec(`ALTER TABLE cards ADD COLUMN archived_at INTEGER`);
   } catch {
     // Column already exists
+  }
+
+  // Multi-user: roles, assignment, authorship
+  const addColumn = (sql: string) => {
+    try {
+      sqlite.exec(sql);
+    } catch {
+      // Column already exists
+    }
+  };
+  addColumn(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'`);
+  addColumn(`ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0`);
+  addColumn(`ALTER TABLE users ADD COLUMN email_notifications INTEGER NOT NULL DEFAULT 1`);
+  addColumn(`ALTER TABLE users ADD COLUMN last_login_at INTEGER`);
+  addColumn(`ALTER TABLE cards ADD COLUMN assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL`);
+  addColumn(`ALTER TABLE cards ADD COLUMN created_by_id TEXT REFERENCES users(id) ON DELETE SET NULL`);
+  addColumn(`ALTER TABLE comments ADD COLUMN author_id TEXT REFERENCES users(id) ON DELETE SET NULL`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cards_assignee_id ON cards(assignee_id)`);
+
+  // Bootstrap: promote the configured admin email(s) to admin
+  const adminEmails = (process.env.ADMIN_EMAIL || "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (adminEmails.length > 0) {
+    const stmt = sqlite.prepare(`UPDATE users SET role = 'admin' WHERE lower(email) = ? AND role != 'admin'`);
+    for (const email of adminEmails) stmt.run(email);
   }
 }
 

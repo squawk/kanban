@@ -3,6 +3,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { KanbanCard as KanbanCardType } from "~/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { MessageSquare, Calendar } from "lucide-react";
+import { UserAvatar } from "./UserAvatar";
 
 interface KanbanCardProps {
   card: KanbanCardType;
@@ -192,13 +193,22 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt }: KanbanC
               )}
             </div>
 
-            {/* Comments count */}
-            {card.comments && card.comments.length > 0 && (
-              <div className="flex items-center gap-1">
-                <MessageSquare className="h-3 w-3" />
-                <span>{card.comments.length}</span>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              {/* Comments count */}
+              {card.comments && card.comments.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <MessageSquare className="h-3 w-3" />
+                  <span>{card.comments.length}</span>
+                </div>
+              )}
+
+              {/* Assignee */}
+              {card.assignee && (
+                <span data-testid="card-assignee" title={`Assigned to ${card.assignee.name}`}>
+                  <UserAvatar user={card.assignee} size="xs" />
+                </span>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

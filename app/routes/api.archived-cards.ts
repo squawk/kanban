@@ -1,209 +1,86 @@
 import { db } from "~/lib/db";
-import { cards, columns, cardTags, tags } from "~/lib/db/schema";
-import { eq, and, isNotNull, desc, inArray } from "drizzle-orm";
-import { getSession, getUserBoard } from "~/lib/auth";
+import { cards, columns, cardTags } from "~/lib/db/schema";
+import { eq, and, isNotNull, desc, asc } from "drizzle-orm";
+import { api, boardIdFromRequest, requireCardAccess, requireUser, resolveBoard } from "~/lib/access.server";
+import { serializeCards } from "~/lib/board-serialize.server";
+import { json, jsonError, readJson } from "~/lib/http";
+import { logAudit } from "~/lib/audit.server";
 
-// GET /api/archived-cards - Get all archived cards for the user's board
-export async function loader({ request }: { request: Request }) {
-  try {
-    const session = await getSession(request);
-    if (!session.userId) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
-    }
+// GET /api/archived-cards?boardId= - Archived cards for a board
+export const loader = api("fetch archived cards", async ({ request }: { request: Request }) => {
+  const user = await requireUser(request);
+  const { board } = resolveBoard(user, boardIdFromRequest(request));
 
-    const board = getUserBoard(session.userId);
-    if (!board) {
-      return new Response(
-        JSON.stringify({ error: "Board not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
+  const archivedCards = db
+    .select()
+    .from(cards)
+    .where(and(eq(cards.boardId, board.id), isNotNull(cards.archivedAt)))
+    .orderBy(desc(cards.archivedAt))
+    .all();
 
-    // Get archived cards for this board
-    const archivedCards = db
-      .select()
-      .from(cards)
-      .where(and(eq(cards.boardId, board.id), isNotNull(cards.archivedAt)))
-      .orderBy(desc(cards.archivedAt))
-      .all();
-
-    // Get all tags for enriching card data
-    const allTags = db.select().from(tags).all();
-    const tagMap = new Map(allTags.map((t) => [t.id, t]));
-
-    // Get card tags for archived cards
-    // BOLT OPTIMIZATION: Use database-level filtering with inArray instead of fetching all and filtering in-memory
-    const cardIds = archivedCards.map((c) => c.id);
-    const allCardTags = cardIds.length > 0
-      ? db.select().from(cardTags).where(inArray(cardTags.cardId, cardIds)).all()
-      : [];
-
-    // Transform cards with tags
-    const transformedCards = archivedCards.map((card) => {
-      const cardTagRelations = allCardTags.filter((ct) => ct.cardId === card.id);
-      const cardTagList = cardTagRelations
-        .map((ct) => tagMap.get(ct.tagId))
-        .filter((t): t is NonNullable<typeof t> => t !== undefined);
-
-      return {
-        id: card.id,
-        title: card.title,
-        notes: card.notes,
-        priority: card.priority,
-        dueDate: card.dueDate ? card.dueDate.toISOString() : undefined,
-        tags: cardTagList.map((tag) => ({
-          id: tag.id,
-          name: tag.name,
-          color: tag.color,
-          createdAt: tag.createdAt.toISOString(),
-          updatedAt: tag.updatedAt.toISOString(),
-        })),
-        archivedAt: card.archivedAt ? card.archivedAt.toISOString() : undefined,
-        createdAt: card.createdAt.toISOString(),
-        updatedAt: card.updatedAt.toISOString(),
-      };
-    });
-
-    return new Response(JSON.stringify(transformedCards), {
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (error) {
-    console.error("Error fetching archived cards:", error);
-    return new Response(
-      JSON.stringify({ error: "Failed to fetch archived cards" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
-  }
-}
+  return json(serializeCards(archivedCards, { includeComments: false }));
+});
 
 // POST /api/archived-cards - Restore or permanently delete an archived card
-export async function action({ request }: { request: Request }) {
-  if (request.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+export const action = api("update archived card", async ({ request }: { request: Request }) => {
+  if (request.method !== "POST") return jsonError("Method not allowed", 405);
+
+  const user = await requireUser(request);
+  const { action, cardId, columnId } = await readJson<{ action?: string; cardId?: string; columnId?: string }>(request);
+  if (!cardId) return jsonError("Card ID is required", 400);
+
+  const { card, role } = requireCardAccess(user, cardId);
+  if (!card.archivedAt) return jsonError("Card is not archived", 400);
+
+  if (action === "restore") {
+    const column = columnId
+      ? db.select().from(columns).where(and(eq(columns.id, columnId), eq(columns.boardId, card.boardId))).get()
+      : db.select().from(columns).where(eq(columns.boardId, card.boardId)).orderBy(asc(columns.position)).get();
+
+    if (!column) return jsonError(columnId ? "Column not found" : "No columns found to restore card to", columnId ? 404 : 400);
+
+    const now = new Date();
+    db.transaction((tx) => {
+      tx.update(cards).set({ archivedAt: null, updatedAt: now }).where(eq(cards.id, cardId)).run();
+      const fresh = tx.select().from(columns).where(eq(columns.id, column.id)).get()!;
+      const ids = JSON.parse(fresh.cardIds) as string[];
+      if (!ids.includes(cardId)) ids.push(cardId);
+      tx.update(columns).set({ cardIds: JSON.stringify(ids), updatedAt: now }).where(eq(columns.id, column.id)).run();
+    });
+
+    logAudit({
+      actor: user,
+      action: "card.restored",
+      entityType: "card",
+      entityId: cardId,
+      boardId: card.boardId,
+      summary: `Restored "${card.title}" to ${column.title}`,
+      request,
+    });
+
+    return json({ success: true, columnId: column.id });
   }
 
-  try {
-    const session = await getSession(request);
-    if (!session.userId) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
-    }
+  if (action === "delete") {
+    if (role !== "owner") return jsonError("Only the board owner can permanently delete cards", 403);
 
-    const board = getUserBoard(session.userId);
-    if (!board) {
-      return new Response(
-        JSON.stringify({ error: "Board not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
+    db.transaction((tx) => {
+      tx.delete(cardTags).where(eq(cardTags.cardId, cardId)).run();
+      tx.delete(cards).where(eq(cards.id, cardId)).run(); // comments cascade
+    });
 
-    const { action, cardId, columnId } = await request.json();
+    logAudit({
+      actor: user,
+      action: "card.deleted",
+      entityType: "card",
+      entityId: cardId,
+      boardId: card.boardId,
+      summary: `Permanently deleted "${card.title}"`,
+      request,
+    });
 
-    if (!cardId) {
-      return new Response(
-        JSON.stringify({ error: "Card ID is required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Verify card belongs to user's board and is archived
-    const card = db.select().from(cards).where(eq(cards.id, cardId)).get();
-    if (!card || card.boardId !== board.id) {
-      return new Response(
-        JSON.stringify({ error: "Card not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    if (!card.archivedAt) {
-      return new Response(
-        JSON.stringify({ error: "Card is not archived" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    if (action === "restore") {
-      // Restore card - clear archivedAt and add to specified column (or first column)
-      let targetColumnId = columnId;
-
-      if (!targetColumnId) {
-        // Get first column if no column specified
-        const firstColumn = db
-          .select()
-          .from(columns)
-          .where(eq(columns.boardId, board.id))
-          .orderBy(columns.position)
-          .get();
-
-        if (!firstColumn) {
-          return new Response(
-            JSON.stringify({ error: "No columns found to restore card to" }),
-            { status: 400, headers: { "Content-Type": "application/json" } }
-          );
-        }
-        targetColumnId = firstColumn.id;
-      }
-
-      // Verify column belongs to user's board
-      const column = db
-        .select()
-        .from(columns)
-        .where(and(eq(columns.id, targetColumnId), eq(columns.boardId, board.id)))
-        .get();
-
-      if (!column) {
-        return new Response(
-          JSON.stringify({ error: "Column not found" }),
-          { status: 404, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      // Clear archivedAt
-      db.update(cards)
-        .set({ archivedAt: null, updatedAt: new Date() })
-        .where(eq(cards.id, cardId))
-        .run();
-
-      // Add card to column
-      const cardIdsList = JSON.parse(column.cardIds);
-      cardIdsList.push(cardId);
-      db.update(columns)
-        .set({ cardIds: JSON.stringify(cardIdsList), updatedAt: new Date() })
-        .where(eq(columns.id, targetColumnId))
-        .run();
-
-      return new Response(JSON.stringify({ success: true, columnId: targetColumnId }), {
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    if (action === "delete") {
-      // Permanently delete the card
-      // Delete card tags
-      db.delete(cardTags).where(eq(cardTags.cardId, cardId)).run();
-
-      // Delete the card (comments will cascade)
-      db.delete(cards).where(eq(cards.id, cardId)).run();
-
-      return new Response(JSON.stringify({ success: true }), {
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    return new Response(
-      JSON.stringify({ error: "Invalid action. Use 'restore' or 'delete'" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
-  } catch (error) {
-    console.error("Error with archived card operation:", error);
-    return new Response(
-      JSON.stringify({ error: "Failed to perform operation" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return json({ success: true });
   }
-}
+
+  return jsonError("Invalid action. Use 'restore' or 'delete'", 400);
+});

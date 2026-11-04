@@ -15,6 +15,9 @@ interface ArchivedCardsDialogProps {
   onOpenChange: (open: boolean) => void;
   columns: KanbanColumn[];
   onCardRestored: () => void;
+  boardId?: string;
+  /** Only board owners may permanently delete cards */
+  canDelete?: boolean;
 }
 
 export function ArchivedCardsDialog({
@@ -22,6 +25,8 @@ export function ArchivedCardsDialog({
   onOpenChange,
   columns,
   onCardRestored,
+  boardId,
+  canDelete = true,
 }: ArchivedCardsDialogProps) {
   const [archivedCards, setArchivedCards] = useState<KanbanCard[]>([]);
   const [loading, setLoading] = useState(false);
@@ -32,12 +37,14 @@ export function ArchivedCardsDialog({
     if (open) {
       fetchArchivedCards();
     }
-  }, [open]);
+  }, [open, boardId]);
 
   const fetchArchivedCards = async () => {
     setLoading(true);
     try {
-      const response = await apiFetch("/api/archived-cards");
+      const response = await apiFetch(
+        boardId ? `/api/archived-cards?boardId=${encodeURIComponent(boardId)}` : "/api/archived-cards"
+      );
       if (response.ok) {
         const data = await response.json();
         setArchivedCards(data);
@@ -221,6 +228,7 @@ export function ArchivedCardsDialog({
                             <RotateCcw className="h-3 w-3 mr-1" />
                             {actionLoading === card.id ? "..." : "Restore"}
                           </Button>
+{canDelete && (
                           <Button
                             size="sm"
                             variant="ghost"
@@ -231,6 +239,7 @@ export function ArchivedCardsDialog({
                             <Trash2 className="h-3 w-3 mr-1" />
                             Delete
                           </Button>
+                          )}
                         </>
                       )}
                     </div>

@@ -6,6 +6,7 @@ import {
   deleteUser,
 } from "~/lib/auth";
 import { sendApprovalNotificationEmail } from "~/lib/email";
+import { logAudit } from "~/lib/audit.server";
 
 const ADMIN_SECRET = process.env.ADMIN_APPROVAL_SECRET || process.env.SESSION_SECRET;
 
@@ -93,6 +94,15 @@ export async function loader({ request }: { request: Request }) {
       // Create their board now that they're approved
       createUserBoard(userId);
 
+      logAudit({
+        action: "user.approved",
+        entityType: "user",
+        entityId: userId,
+        summary: `${user.email} approved via email link`,
+        metadata: { via: "email_link" },
+        request,
+      });
+
       // Send notification email
       await sendApprovalNotificationEmail(user.email, user.name, true);
 
@@ -110,6 +120,15 @@ export async function loader({ request }: { request: Request }) {
 
       // Delete the user
       deleteUser(userId);
+
+      logAudit({
+        action: "user.rejected",
+        entityType: "user",
+        entityId: userId,
+        summary: `${user.email} rejected via email link (account removed)`,
+        metadata: { via: "email_link", email: user.email },
+        request,
+      });
 
       return new Response(
         generateHtmlResponse(
