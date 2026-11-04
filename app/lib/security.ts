@@ -16,7 +16,7 @@ interface RateLimitConfig {
 const RATE_LIMITS: Record<string, RateLimitConfig> = {
   auth: { windowMs: 15 * 60 * 1000, maxRequests: 5 },  // 5 attempts per 15 min
   api: { windowMs: 60 * 1000, maxRequests: 100 },  // 100 requests per minute
-  openai: { windowMs: 60 * 1000, maxRequests: 10 },  // 10 AI generations per minute
+  ai: { windowMs: 60 * 1000, maxRequests: 10 },  // 10 AI generations per minute
 };
 
 interface RateLimitBinding {
@@ -27,7 +27,7 @@ interface RateLimitBinding {
 const RATE_LIMIT_BINDINGS: Record<keyof typeof RATE_LIMITS, string> = {
   auth: "AUTH_RATE_LIMITER",
   api: "API_RATE_LIMITER",
-  openai: "OPENAI_RATE_LIMITER",
+  ai: "AI_RATE_LIMITER",
 };
 
 /**
@@ -131,7 +131,7 @@ export const SECURITY_HEADERS: Record<string, string> = {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",   // unsafe-inline needed for Tailwind, fonts for theme
     "img-src 'self' data: https:",
     "font-src 'self' https://fonts.gstatic.com",  // Google Fonts
-    "connect-src 'self' https://api.openai.com wss://*.supabase.co",  // Supabase Realtime (live board updates)
+    "connect-src 'self' wss://*.supabase.co",  // Supabase Realtime (live board updates)
     "worker-src 'self' blob:",  // Allow web workers from blob URLs (needed for canvas-confetti)
     "frame-ancestors 'none'",
     "base-uri 'self'",
