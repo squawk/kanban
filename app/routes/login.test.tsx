@@ -45,11 +45,14 @@ describe("Login Page Theme Backgrounds", () => {
       expect(document.documentElement.getAttribute("data-theme")).toBe("modern");
     });
 
-    it("should have bg-background class on login container with modern theme", () => {
+    it("should let the modern theme's page background show through the login container", () => {
       renderWithProviders(<LoginPage />, "modern");
 
+      // The theme background (paper texture / modern gradient) is painted on <body> in
+      // app.css; a solid bg-* on the full-screen container would cover it up.
       const container = screen.getByText("Kanban Board").closest(".min-h-screen");
-      expect(container).toHaveClass("bg-background");
+      expect(container).toBeInTheDocument();
+      expect(container!.className).not.toMatch(/(^|\s)bg-/);
     });
 
     it("should show 'Vintage' option in theme toggle when modern theme is active", () => {
@@ -68,11 +71,14 @@ describe("Login Page Theme Backgrounds", () => {
       expect(document.documentElement.getAttribute("data-theme")).toBe("vintage");
     });
 
-    it("should have bg-background class on login container with vintage theme", () => {
+    it("should let the vintage theme's page background show through the login container", () => {
       renderWithProviders(<LoginPage />, "vintage");
 
+      // The theme background (paper texture / modern gradient) is painted on <body> in
+      // app.css; a solid bg-* on the full-screen container would cover it up.
       const container = screen.getByText("Kanban Board").closest(".min-h-screen");
-      expect(container).toHaveClass("bg-background");
+      expect(container).toBeInTheDocument();
+      expect(container!.className).not.toMatch(/(^|\s)bg-/);
     });
 
     it("should show 'Modern' option in theme toggle when vintage theme is active", () => {
