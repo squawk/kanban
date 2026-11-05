@@ -43,6 +43,9 @@ describe("matchesSpotlight", () => {
     expect(matchesSpotlight(card("a", { assigneeId: "u2" }), "mine", ctx)).toBe(false);
     expect(matchesSpotlight(card("a"), "unassigned", ctx)).toBe(true);
     expect(matchesSpotlight(card("a"), "mine", { ...ctx, currentUserId: undefined })).toBe(false);
+    // Private cards light up under "Private", not "Unassigned"
+    expect(matchesSpotlight(card("a", { isPrivate: true }), "private", ctx)).toBe(true);
+    expect(matchesSpotlight(card("a", { isPrivate: true }), "unassigned", ctx)).toBe(false);
   });
 });
 
@@ -73,7 +76,7 @@ describe("computeBoardPulse", () => {
       ["done", 1, true],
     ]);
     // The done card's past due date doesn't count as overdue
-    expect(pulse.counts).toEqual({ overdue: 1, dueSoon: 1, high: 1, mine: 1, unassigned: 2 });
+    expect(pulse.counts).toEqual({ overdue: 1, dueSoon: 1, high: 1, mine: 1, unassigned: 2, private: 0 });
   });
 
   it("handles an empty board", () => {

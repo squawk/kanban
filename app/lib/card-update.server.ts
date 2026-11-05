@@ -16,6 +16,7 @@ import { notifyCardAssigned } from "./notifications.server";
 import { broadcastBoardChanged } from "./realtime.server";
 import { jsonError } from "./http";
 import type { AuthUser } from "./access.server";
+import { auditChanges, cardRef } from "./card-privacy";
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
@@ -31,6 +32,8 @@ export interface CardChanges {
   /** Already validated tag ids */
   tagIds?: string[];
   generatedPrompt?: string;
+  /** Only the creator may change this (checked by the caller); a private card is never assigned */
+  isPrivate?: boolean;
 }
 
 interface Snapshot {
@@ -143,6 +146,8 @@ export async function updateCard(opts: {
     }
 
     const before = snapshotOf(current, await tagsFor(tx, card.id));
+    // A private card can't be assigned, including by restoring a version that had an assignee
+    const willBePrivate = changes.isPrivate ?? current.isPrivate;
 
     await tx
       .update(cards)
@@ -153,6 +158,8 @@ export async function updateCard(opts: {
         ...(changes.dueDate !== undefined && { dueDate: changes.dueDate }),
         ...(changes.priority !== undefined && { priority: changes.priority }),
         ...(changes.assigneeId !== undefined && { assigneeId: changes.assigneeId || null }),
+        ...(changes.isPrivate !== undefined && { isPrivate: changes.isPrivate }),
+        ...(willBePrivate && { assigneeId: null }),
         updatedAt: now,
       })
       .where(eq(cards.id, card.id));
@@ -188,10 +195,24 @@ export async function updateCard(opts: {
         .delete(cardRevisions)
         .where(and(eq(cardRevisions.cardId, card.id), lte(cardRevisions.version, version + 1 - MAX_REVISIONS_PER_CARD)));
     }
-    return { updated, fieldChanges, revision, before };
+    return { updated, fieldChanges, revision, before, wasPrivate: current.isPrivate };
   });
 
-  const { updated, fieldChanges, revision, before } = result;
+  const { updated, fieldChanges, revision, before, wasPrivate } = result;
+  const ref = cardRef(updated);
+
+  if (wasPrivate !== updated.isPrivate) {
+    await logAudit({
+      actor: user,
+      action: updated.isPrivate ? "card.made_private" : "card.made_public",
+      entityType: "card",
+      entityId: card.id,
+      boardId: card.boardId,
+      summary: updated.isPrivate ? "Made a card private" : `Made ${ref} visible to the board`,
+      metadata: {},
+      request,
+    });
+  }
   broadcastBoardChanged(card.boardId); // also covers edits the audit log skips (e.g. AI prompt)
 
   if (restoredFromVersion !== undefined && revision) {
@@ -201,8 +222,8 @@ export async function updateCard(opts: {
       entityType: "card",
       entityId: card.id,
       boardId: card.boardId,
-      summary: `Restored "${updated.title}" to version ${restoredFromVersion}`,
-      metadata: { restoredFromVersion, newVersion: revision.version, changes: fieldChanges },
+      summary: `Restored ${ref} to version ${restoredFromVersion}`,
+      metadata: { restoredFromVersion, newVersion: revision.version, changes: auditChanges(fieldChanges, updated.isPrivate) },
       request,
     });
   } else {
@@ -214,8 +235,8 @@ export async function updateCard(opts: {
         entityType: "card",
         entityId: card.id,
         boardId: card.boardId,
-        summary: `Updated ${nonAssign.map((c) => c.field).join(", ")} on "${updated.title}"`,
-        metadata: { changes: nonAssign, version: revision?.version },
+        summary: `Updated ${nonAssign.map((c) => c.field).join(", ")} on ${ref}`,
+        metadata: { changes: auditChanges(nonAssign, updated.isPrivate), version: revision?.version },
         request,
       });
     }
@@ -232,8 +253,8 @@ export async function updateCard(opts: {
         entityId: card.id,
         boardId: card.boardId,
         summary: nextAssignee
-          ? `Assigned "${updated.title}" to ${await userName(nextAssignee)}`
-          : `Unassigned "${updated.title}" (was ${await userName(prevAssignee)})`,
+          ? `Assigned ${ref} to ${await userName(nextAssignee)}`
+          : `Unassigned ${ref} (was ${await userName(prevAssignee)})`,
         metadata: { from: prevAssignee, to: nextAssignee },
         request,
       });

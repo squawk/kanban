@@ -4,11 +4,12 @@
  * All helpers *throw* a JSON `Response` on failure; wrap handlers with `api()` so
  * thrown responses are returned and unexpected errors become a sanitized 500.
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, type SQL } from "drizzle-orm";
 import { db, firstRow } from "./db";
 import { boardMembers, boards, cards, columns, users, type User } from "./db/schema";
 import { createUserBoard, getSession } from "./auth";
 import { jsonError } from "./http";
+import { canSeeCard } from "./card-privacy";
 
 export type AuthUser = Pick<User, "id" | "email" | "name" | "role" | "emailNotifications">;
 export type BoardRole = "owner" | "member";
@@ -107,8 +108,34 @@ export async function requireCardAccess(user: AuthUser, cardId: string) {
   const card = await db.select().from(cards).where(eq(cards.id, cardId)).limit(1).then(firstRow);
   if (!card) throw jsonError("Card not found", 404);
   const role = await getBoardRole(user.id, card.boardId);
-  if (!role) throw jsonError("Card not found", 404);
+  // Someone else's private card doesn't exist as far as this user is concerned
+  if (!role || !canSeeCard(card, user.id)) throw jsonError("Card not found", 404);
   return { card, role };
+}
+
+/** Ids of cards on these boards that `userId` may not see (other people's private cards). */
+export async function hiddenCardIds(
+  boardIds: string[],
+  userId: string,
+  executor: Pick<typeof db, "select"> = db,
+): Promise<Set<string>> {
+  if (boardIds.length === 0) return new Set();
+  const rows = await executor
+    .select({ id: cards.id })
+    .from(cards)
+    .where(
+      and(
+        inArray(cards.boardId, boardIds),
+        eq(cards.isPrivate, true),
+        or(isNull(cards.createdById), ne(cards.createdById, userId)),
+      ),
+    );
+  return new Set(rows.map((r) => r.id));
+}
+
+/** SQL filter for cards `userId` may see: every non-private card, plus their own private ones. */
+export function visibleCardsFor(userId: string): SQL {
+  return or(eq(cards.isPrivate, false), eq(cards.createdById, userId))!;
 }
 
 export async function requireColumnAccess(user: AuthUser, columnId: string) {

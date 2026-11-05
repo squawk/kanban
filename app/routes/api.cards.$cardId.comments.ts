@@ -3,6 +3,7 @@ import { comments, users } from "~/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { api, requireCardAccess, requireUser } from "~/lib/access.server";
+import { cardRef } from "~/lib/card-privacy";
 import { json, jsonError, readJson } from "~/lib/http";
 import { INPUT_LIMITS } from "~/lib/security";
 import { logAudit } from "~/lib/audit.server";
@@ -69,8 +70,8 @@ export const action = api(
       entityType: "card",
       entityId: card.id,
       boardId: card.boardId,
-      summary: `Commented on "${card.title}"`,
-      metadata: { commentId, preview: trimmed.slice(0, 140) },
+      summary: `Commented on ${cardRef(card)}`,
+      metadata: { commentId, ...(!card.isPrivate && { preview: trimmed.slice(0, 140) }) },
       request,
     });
     notifyCardCommented(card, trimmed, user);

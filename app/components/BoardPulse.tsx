@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { AlertTriangle, ArrowUp, CalendarClock, CircleDashed, UserRound, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, CalendarClock, CircleDashed, Lock, UserRound, X } from "lucide-react";
 import { SPOTLIGHT_LABELS, type BoardPulse as BoardPulseData, type SpotlightKind } from "~/lib/board-pulse";
 
 interface BoardPulseProps {
@@ -16,6 +16,7 @@ const LENS_ICONS: Record<SpotlightKind, typeof AlertTriangle> = {
   high: ArrowUp,
   mine: UserRound,
   unassigned: CircleDashed,
+  private: Lock,
 };
 
 /** Accent hue per lens, so a lit card's glow tells you why it's lit */
@@ -25,6 +26,7 @@ export const LENS_HUES: Record<SpotlightKind, number> = {
   high: 330,
   mine: 205,
   unassigned: 260,
+  private: 175,
 };
 
 function ProgressRing({ percent }: { percent: number }) {
@@ -65,7 +67,12 @@ export function BoardPulse({ pulse, spotlight, onSpotlightChange, showMine = tru
     return () => window.removeEventListener("keydown", onKey);
   }, [spotlight, onSpotlightChange]);
 
-  const lenses = (Object.keys(SPOTLIGHT_LABELS) as SpotlightKind[]).filter((k) => showMine || k !== "mine");
+  const lenses = (Object.keys(SPOTLIGHT_LABELS) as SpotlightKind[]).filter(
+    (k) =>
+      (showMine || k !== "mine") &&
+      // Only people with private cards need that lens
+      (k !== "private" || pulse.counts.private > 0 || spotlight === "private"),
+  );
 
   return (
     <section

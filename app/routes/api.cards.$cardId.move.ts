@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db, firstRow } from "~/lib/db";
 import { columns } from "~/lib/db/schema";
 import { api, requireCardAccess, requireUser } from "~/lib/access.server";
+import { cardRef } from "~/lib/card-privacy";
 import { json, jsonError, readJson } from "~/lib/http";
 import { logAudit } from "~/lib/audit.server";
 import { notifyCardMoved } from "~/lib/notifications.server";
@@ -51,11 +52,11 @@ export const action = api("move card", async ({ request, params }: { request: Re
       entityType: "card",
       entityId: card.id,
       boardId: card.boardId,
-      summary: `Moved "${card.title}" from ${from} to ${to}`,
+      summary: `Moved ${cardRef(card)} from ${from} to ${to}`,
       metadata: { fromColumnId: result.from?.id ?? null, toColumnId: result.to.id, from, to },
       request,
     });
-    notifyCardMoved(card, from, to, user);
+    if (!card.isPrivate) notifyCardMoved(card, from, to, user);
   }
   return json({ success: true, column: { id: result.to.id, title: result.to.title } });
 });

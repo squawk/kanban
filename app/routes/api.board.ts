@@ -5,10 +5,13 @@ import {
   api,
   boardIdFromRequest,
   getBoardParticipants,
+  hiddenCardIds,
   listAccessibleBoards,
   requireUser,
   resolveBoard,
+  visibleCardsFor,
 } from "~/lib/access.server";
+import { cardRef, restoreHiddenCards } from "~/lib/card-privacy";
 import { serializeCards } from "~/lib/board-serialize.server";
 import { json, jsonError, readJson } from "~/lib/http";
 import { detectCardMoves } from "~/lib/card-diff";
@@ -34,12 +37,14 @@ export const loader = api("fetch board", async ({ request }: { request: Request 
   const boardCards = await db
     .select()
     .from(cards)
-    .where(and(eq(cards.boardId, board.id), isNull(cards.archivedAt)));
+    .where(and(eq(cards.boardId, board.id), isNull(cards.archivedAt), visibleCardsFor(user.id)));
 
+  // Other people's private cards: not even their ids leave the server
+  const hidden = await hiddenCardIds([board.id], user.id);
   const outColumns = boardColumns.map((col) => ({
     id: col.id,
     title: col.title,
-    cardIds: JSON.parse(col.cardIds) as string[],
+    cardIds: (JSON.parse(col.cardIds) as string[]).filter((id) => !hidden.has(id)),
   }));
 
   // A board also shows cards assigned to its owner on other boards, to anyone viewing
@@ -108,16 +113,25 @@ export const action = api("update board", async ({ request }: { request: Request
       }
     }
     const referenced = submittedCardIds.size
-      ? await tx.select({ id: cards.id, boardId: cards.boardId }).from(cards).where(inArray(cards.id, [...submittedCardIds]))
+      ? await tx
+          .select({ id: cards.id, boardId: cards.boardId, isPrivate: cards.isPrivate, createdById: cards.createdById })
+          .from(cards)
+          .where(inArray(cards.id, [...submittedCardIds]))
       : [];
     if (referenced.some((c) => c.boardId !== board.id)) return { error: jsonError("Card access denied", 403) };
+    if (referenced.some((c) => c.isPrivate && c.createdById !== user.id)) return { error: jsonError("Card access denied", 403) };
 
     // Collaboration safety: if a collaborator added a card the client hasn't seen yet,
     // keep it in its current column instead of silently dropping it.
-    const afterLayout: Layout = (newColumns as Layout).map((c) => ({
-      id: c.id,
-      cardIds: c.cardIds.filter((id, i, arr) => arr.indexOf(id) === i),
-    }));
+    // Other people's private cards were never sent to this client: put them back where
+    // they were in each column rather than dropping them or sinking them to the bottom.
+    const hidden = await hiddenCardIds([board.id], user.id, tx);
+    const afterLayout: Layout = (newColumns as Layout).map((c) => {
+      const cardIds = c.cardIds.filter((id, i, arr) => arr.indexOf(id) === i);
+      const before = beforeLayout.find((b) => b.id === c.id)?.cardIds ?? [];
+      return { id: c.id, cardIds: hidden.size ? restoreHiddenCards(before, cardIds, hidden) : cardIds };
+    });
+    for (const id of hidden) submittedCardIds.add(id); // already placed above
     for (const before of beforeLayout) {
       const missing = before.cardIds.filter((id) => !submittedCardIds.has(id));
       if (missing.length) {
@@ -156,11 +170,11 @@ export const action = api("update board", async ({ request }: { request: Request
         entityType: "card",
         entityId: card.id,
         boardId: board.id,
-        summary: `Moved "${card.title}" from ${from} to ${to}`,
+        summary: `Moved ${cardRef(card)} from ${from} to ${to}`,
         metadata: { fromColumnId: move.fromColumnId, toColumnId: move.toColumnId, from, to },
         request,
       });
-      notifyCardMoved(card, from, to, user);
+      if (!card.isPrivate) notifyCardMoved(card, from, to, user);
     }
   }
 
@@ -182,7 +196,15 @@ async function linkedCardsFor(ownerId: string, boardId: string, viewerId: string
   const assigned = await db
     .select()
     .from(cards)
-    .where(and(eq(cards.assigneeId, ownerId), isNull(cards.archivedAt), inArray(cards.boardId, sourceIds), ne(cards.boardId, boardId)));
+    .where(
+      and(
+        eq(cards.assigneeId, ownerId),
+        isNull(cards.archivedAt),
+        inArray(cards.boardId, sourceIds),
+        ne(cards.boardId, boardId),
+        visibleCardsFor(viewerId),
+      ),
+    );
   if (assigned.length === 0) return [];
 
   const label = (id: string) => {
@@ -228,7 +250,7 @@ async function combinedBoard(userId: string) {
   }
 
   const boardCards = boardIds.length
-    ? await db.select().from(cards).where(and(inArray(cards.boardId, boardIds), isNull(cards.archivedAt)))
+    ? await db.select().from(cards).where(and(inArray(cards.boardId, boardIds), isNull(cards.archivedAt), visibleCardsFor(userId)))
     : [];
   const live = new Set(boardCards.map((c) => c.id));
   for (const col of merged.values()) col.cardIds = col.cardIds.filter((id) => live.has(id));

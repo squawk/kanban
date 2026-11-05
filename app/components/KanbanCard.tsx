@@ -2,7 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { KanbanCard as KanbanCardType, UserSummary } from "~/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { MessageSquare, Calendar, Lock, ArrowUpRight } from "lucide-react";
+import { MessageSquare, Calendar, Lock, ArrowUpRight, EyeOff } from "lucide-react";
 import { UserAvatar } from "./UserAvatar";
 
 interface KanbanCardProps {
@@ -101,6 +101,15 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy,
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <CardTitle className="text-sm font-semibold text-foreground line-clamp-2">
+                {card.isPrivate && (
+                  <span
+                    className="mr-1.5 inline-flex translate-y-[1px] items-center rounded-full bg-muted p-1 align-baseline text-muted-foreground"
+                    title="Private: only you can see this card"
+                    data-testid="card-private"
+                  >
+                    <EyeOff className="h-3 w-3" aria-label="Private" />
+                  </span>
+                )}
                 {card.title}
               </CardTitle>
               {card.linkedFrom && (

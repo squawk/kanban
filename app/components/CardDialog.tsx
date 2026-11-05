@@ -26,6 +26,8 @@ interface CardDialogProps {
     priority: 'low' | 'medium' | 'high';
     tagIds: string[];
     assigneeId?: string | null;
+    /** Sent only when this user may change it (new cards, or cards they created) */
+    isPrivate?: boolean;
   }) => void | boolean | Promise<void | boolean>;
   initialCard?: KanbanCard;
   cardId?: string;
@@ -81,6 +83,9 @@ export function CardDialog({
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [assigneeId, setAssigneeId] = useState<string>("");
+  const [isPrivate, setIsPrivate] = useState(false);
+  // Only the creator decides who sees a card (anyone can choose for a new one)
+  const canChangePrivacy = !cardId || (!!currentUserId && initialCard?.createdBy?.id === currentUserId);
 
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [showActivity, setShowActivity] = useState(false);
@@ -112,6 +117,7 @@ export function CardDialog({
       setPriority(initialCard?.priority || 'medium');
       setSelectedTagIds(initialCard?.tags?.map(t => t.id) || []);
       setAssigneeId(initialCard?.assigneeId || "");
+      setIsPrivate(!!initialCard?.isPrivate);
       setShowActivity(false);
       setActivity([]);
 
@@ -215,7 +221,10 @@ export function CardDialog({
         dueDate: dueDate || undefined,
         priority,
         tagIds: selectedTagIds,
-        ...(members ? { assigneeId: assigneeId || null } : {}),
+        // A private card is never assigned
+        ...(members ? { assigneeId: isPrivate ? null : assigneeId || null } : {}),
+        // Only when it changed (new cards start public)
+        ...(canChangePrivacy && isPrivate !== !!initialCard?.isPrivate && { isPrivate }),
       });
       setSaving(false);
       // A failed save (e.g. someone else holds the lock) keeps the dialog and your edits
@@ -230,6 +239,7 @@ export function CardDialog({
     setPriority('medium');
     setSelectedTagIds([]);
     setAssigneeId("");
+    setIsPrivate(false);
     setComments([]);
     setNewComment("");
     onOpenChange(false);
@@ -424,8 +434,40 @@ export function CardDialog({
             </div>
           </div>
 
-          {/* Assignee */}
-          {members && members.length > 0 && (
+          {/* Who can see it: only the creator can change this */}
+          {canChangePrivacy && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isPrivate}
+              onClick={() => setIsPrivate((v) => !v)}
+              data-testid="card-private-toggle"
+              className={`flex w-full items-center gap-3 rounded-lg border-2 px-3 py-2 text-left transition-colors ${
+                isPrivate ? "border-primary bg-primary/10" : "border-border hover:bg-muted"
+              }`}
+            >
+              <Lock className={`h-4 w-4 shrink-0 ${isPrivate ? "text-primary" : "text-muted-foreground"}`} aria-hidden="true" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-foreground">Private</span>
+                <span className="block text-xs text-muted-foreground">
+                  {isPrivate
+                    ? "Only you can see this card. Not the board owner, other members, or admins."
+                    : "Everyone on this board can see this card."}
+                </span>
+              </span>
+              <span
+                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${isPrivate ? "bg-primary" : "bg-muted-foreground/30"}`}
+                aria-hidden="true"
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${isPrivate ? "translate-x-4" : "translate-x-0.5"}`}
+                />
+              </span>
+            </button>
+          )}
+
+          {/* Assignee (a private card can't be assigned) */}
+          {members && members.length > 0 && !isPrivate && (
             <div className="space-y-2">
               <label htmlFor="assignee" className="text-sm font-medium text-foreground flex items-center gap-1">
                 <UserIcon className="h-3 w-3" />

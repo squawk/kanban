@@ -1,7 +1,8 @@
 import { db, firstRow } from "~/lib/db";
 import { cards, columns, cardTags } from "~/lib/db/schema";
 import { eq, and, isNotNull, desc, asc } from "drizzle-orm";
-import { api, boardIdFromRequest, requireCardAccess, requireUser, resolveBoard } from "~/lib/access.server";
+import { api, boardIdFromRequest, requireCardAccess, requireUser, resolveBoard, visibleCardsFor } from "~/lib/access.server";
+import { cardRef } from "~/lib/card-privacy";
 import { serializeCards } from "~/lib/board-serialize.server";
 import { json, jsonError, readJson } from "~/lib/http";
 import { logAudit } from "~/lib/audit.server";
@@ -14,7 +15,7 @@ export const loader = api("fetch archived cards", async ({ request }: { request:
   const archivedCards = await db
     .select()
     .from(cards)
-    .where(and(eq(cards.boardId, board.id), isNotNull(cards.archivedAt)))
+    .where(and(eq(cards.boardId, board.id), isNotNull(cards.archivedAt), visibleCardsFor(user.id)))
     .orderBy(desc(cards.archivedAt));
 
   return json(await serializeCards(archivedCards, { includeComments: false }));
@@ -53,7 +54,7 @@ export const action = api("update archived card", async ({ request }: { request:
       entityType: "card",
       entityId: cardId,
       boardId: card.boardId,
-      summary: `Restored "${card.title}" to ${column.title}`,
+      summary: `Restored ${cardRef(card)} to ${column.title}`,
       request,
     });
 
@@ -74,7 +75,7 @@ export const action = api("update archived card", async ({ request }: { request:
       entityType: "card",
       entityId: cardId,
       boardId: card.boardId,
-      summary: `Permanently deleted "${card.title}"`,
+      summary: `Permanently deleted ${cardRef(card)}`,
       request,
     });
 
