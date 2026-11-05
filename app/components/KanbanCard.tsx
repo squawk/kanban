@@ -82,6 +82,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy,
       ref={setNodeRef}
       style={style}
       className={`group transition-all duration-300 ${isDragging ? "opacity-50" : fade}`}
+      data-testid="kanban-card"
       data-assigned-to-other={assignedToOther || undefined}
       data-spotlight={spotlight}
       {...attributes}

@@ -128,6 +128,20 @@ npm run dev                             # runs in workerd via @cloudflare/vite-p
 Any Postgres works locally (Docker, Postgres.app, `supabase start`, or a dev Supabase project).
 Without `SENDGRID_API_KEY`, emails are printed to the console in development.
 
+### End-to-end tests
+The Playwright suite (`e2e/`) drives the dev server against a local Postgres. It signs up
+`e2e@example.com`, marks it verified, and resets that user's board before each test, so point
+it at a throwaway database. CI runs it on every pull request (`.github/workflows/ci.yml`).
+
+```bash
+# .dev.vars needs SIGNUP_MODE=open and SIGNUP_REQUIRE_APPROVAL=false (or ADMIN_EMAIL=e2e@example.com)
+export DATABASE_URL="postgres://postgres:postgres@localhost:5432/kanban_e2e"
+export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$DATABASE_URL"
+npm run db:migrate
+npx playwright install chromium   # once
+npm run test:e2e                  # starts `npm run dev` unless one is already running
+```
+
 To trigger the reminder cron locally:
 `curl "http://localhost:5173/cdn-cgi/handler/scheduled?time=$(date +%s)000"`.
 
