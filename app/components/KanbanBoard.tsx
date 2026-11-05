@@ -540,6 +540,7 @@ export function KanbanBoard({
     priority: 'low' | 'medium' | 'high';
     tagIds: string[];
     assigneeId?: string | null;
+    isPrivate?: boolean;
   }): Promise<boolean> => {
     setSaveError(undefined);
     setSaveConflict(false);
@@ -556,6 +557,7 @@ export function KanbanBoard({
             priority: data.priority,
             tagIds: data.tagIds,
             ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId }),
+            ...(data.isPrivate !== undefined && { isPrivate: data.isPrivate }),
             // The version this editor loaded: the server refuses the save if someone saved since
             ...(editingCard.version !== undefined && { expectedVersion: editingCard.version }),
           }),
@@ -606,6 +608,7 @@ export function KanbanBoard({
             tagIds: data.tagIds,
             columnId: targetColumnId,
             ...(data.assigneeId && { assigneeId: data.assigneeId }),
+            ...(data.isPrivate && { isPrivate: true }),
           }),
         });
 

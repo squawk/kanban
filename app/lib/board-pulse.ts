@@ -6,7 +6,7 @@
 import { isDoneColumn } from "./due-reminders";
 import type { KanbanBoard, KanbanCard } from "./types";
 
-export type SpotlightKind = "overdue" | "dueSoon" | "high" | "mine" | "unassigned";
+export type SpotlightKind = "overdue" | "dueSoon" | "high" | "mine" | "unassigned" | "private";
 
 export const SPOTLIGHT_LABELS: Record<SpotlightKind, string> = {
   overdue: "Overdue",
@@ -14,6 +14,7 @@ export const SPOTLIGHT_LABELS: Record<SpotlightKind, string> = {
   high: "High priority",
   mine: "Mine",
   unassigned: "Unassigned",
+  private: "Private",
 };
 
 /** Lane hues, assigned to columns in order; done columns are always green. */
@@ -57,7 +58,10 @@ export function matchesSpotlight(card: KanbanCard, kind: SpotlightKind, ctx: Spo
     case "mine":
       return !!ctx.currentUserId && card.assigneeId === ctx.currentUserId;
     case "unassigned":
-      return !card.assigneeId;
+      // A private card can't be assigned, so it isn't waiting for an owner
+      return !card.assigneeId && !card.isPrivate;
+    case "private":
+      return !!card.isPrivate;
   }
 }
 
@@ -82,7 +86,7 @@ export function computeBoardPulse(
   board: Pick<KanbanBoard, "columns" | "cards">,
   opts: { currentUserId?: string; now?: Date } = {},
 ): BoardPulse {
-  const counts: Record<SpotlightKind, number> = { overdue: 0, dueSoon: 0, high: 0, mine: 0, unassigned: 0 };
+  const counts: Record<SpotlightKind, number> = { overdue: 0, dueSoon: 0, high: 0, mine: 0, unassigned: 0, private: 0 };
   let total = 0;
   let doneCount = 0;
   const lanes = board.columns.map((col, i) => {

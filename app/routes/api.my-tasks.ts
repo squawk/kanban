@@ -1,7 +1,7 @@
 import { db } from "~/lib/db";
 import { boards, cards, columns } from "~/lib/db/schema";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { api, listAccessibleBoards, requireUser } from "~/lib/access.server";
+import { api, listAccessibleBoards, requireUser, visibleCardsFor } from "~/lib/access.server";
 import { serializeCards } from "~/lib/board-serialize.server";
 import { json } from "~/lib/http";
 
@@ -15,7 +15,7 @@ export const loader = api("list assigned cards", async ({ request }: { request: 
   const assigned = await db
     .select()
     .from(cards)
-    .where(and(eq(cards.assigneeId, user.id), isNull(cards.archivedAt), inArray(cards.boardId, boardIds)));
+    .where(and(eq(cards.assigneeId, user.id), isNull(cards.archivedAt), inArray(cards.boardId, boardIds), visibleCardsFor(user.id)));
   if (assigned.length === 0) return json([]);
 
   const boardNames = new Map(

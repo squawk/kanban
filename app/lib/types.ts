@@ -75,6 +75,8 @@ export interface KanbanCard {
   archivedAt?: string;
   boardId?: string;
   assigneeId?: string | null;
+  /** Only the creator can see it (and it can't be assigned) */
+  isPrivate?: boolean;
   assignee?: UserSummary | null;
   createdBy?: UserSummary | null;
   /** Latest edit-history version (0 = no history yet) */

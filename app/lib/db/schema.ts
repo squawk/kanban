@@ -82,6 +82,8 @@ export const cards = pgTable(
     archivedAt: ts("archived_at"),
     assigneeId: text("assignee_id").references(() => users.id, { onDelete: "set null" }),
     createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    /** Only the creator can see a private card (it can't be assigned to anyone) */
+    isPrivate: boolean("is_private").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
