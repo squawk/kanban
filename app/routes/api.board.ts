@@ -40,10 +40,11 @@ export const loader = api("fetch board", async ({ request }: { request: Request 
     cardIds: JSON.parse(col.cardIds) as string[],
   }));
 
-  // On your own board, also show cards assigned to you on boards shared with you.
-  // They stay on their own board: each appears in the column with the same name here
-  // (the first column if there's none), and moving it here moves it there.
-  const linked = role === "owner" && outColumns.length > 0 ? await linkedCardsFor(user.id, board.id) : [];
+  // A board also shows cards assigned to its owner on other boards, to anyone viewing
+  // it who can see those boards too. They stay on their own board: each appears in the
+  // column with the same name here (the first column if there's none), and moving it
+  // here moves it there.
+  const linked = outColumns.length > 0 ? await linkedCardsFor(board.userId, board.id, user.id) : [];
   for (const { card, columnTitle } of linked) {
     const target = outColumns.find((c) => columnKey(c.title) === columnKey(columnTitle ?? "")) ?? outColumns[0];
     target.cardIds.push(card.id);
@@ -164,24 +165,37 @@ export const action = api("update board", async ({ request }: { request: Request
   return json({ success: true });
 });
 
-/** Active cards assigned to the user on other boards they can access, with each card's column there. */
-async function linkedCardsFor(userId: string, ownBoardId: string) {
-  const others = (await listAccessibleBoards(userId)).filter((b) => b.id !== ownBoardId);
-  if (others.length === 0) return [];
+/**
+ * Active cards assigned to the board's owner on their other boards, limited to boards the
+ * viewer can also access, with each card's column there.
+ */
+async function linkedCardsFor(ownerId: string, boardId: string, viewerId: string) {
+  const ownerBoards = (await listAccessibleBoards(ownerId)).filter((b) => b.id !== boardId);
+  if (ownerBoards.length === 0) return [];
+  const viewerBoards = viewerId === ownerId ? ownerBoards : await listAccessibleBoards(viewerId);
+  const visible = new Map(viewerBoards.filter((b) => b.id !== boardId).map((b) => [b.id, b]));
+  const sourceIds = ownerBoards.map((b) => b.id).filter((id) => visible.has(id));
+  if (sourceIds.length === 0) return [];
+
   const assigned = await db
     .select()
     .from(cards)
-    .where(and(eq(cards.assigneeId, userId), isNull(cards.archivedAt), inArray(cards.boardId, others.map((b) => b.id)), ne(cards.boardId, ownBoardId)));
+    .where(and(eq(cards.assigneeId, ownerId), isNull(cards.archivedAt), inArray(cards.boardId, sourceIds), ne(cards.boardId, boardId)));
   if (assigned.length === 0) return [];
 
-  // Boards are usually all called "My Board", so name them after their owner
-  const label = new Map(
-    others.map((b) => [b.id, b.ownerName && b.name === "My Board" ? `${b.ownerName}'s board` : b.ownerName ? `${b.name} (${b.ownerName})` : b.name])
-  );
+  // Label boards from the viewer's point of view. They're usually all called
+  // "My Board", so name them after their owner.
+  const label = (id: string) => {
+    const b = visible.get(id);
+    if (!b) return "Shared board";
+    if (b.role === "owner") return b.name === "My Board" ? "Your board" : b.name;
+    if (b.ownerName) return b.name === "My Board" ? `${b.ownerName}'s board` : `${b.name} (${b.ownerName})`;
+    return b.name;
+  };
   const sourceBoardIds = [...new Set(assigned.map((c) => c.boardId))];
   const columnOf = new Map<string, string>();
   for (const col of await db.select().from(columns).where(inArray(columns.boardId, sourceBoardIds))) {
     for (const id of JSON.parse(col.cardIds) as string[]) columnOf.set(id, col.title);
   }
-  return assigned.map((card) => ({ card, boardName: label.get(card.boardId) ?? "Shared board", columnTitle: columnOf.get(card.id) ?? null }));
+  return assigned.map((card) => ({ card, boardName: label(card.boardId), columnTitle: columnOf.get(card.id) ?? null }));
 }
