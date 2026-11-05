@@ -1,255 +1,133 @@
-import { test, expect } from "@playwright/test";
+import {
+  test,
+  expect,
+  card,
+  createCard,
+  dialog,
+  fillCardFields,
+  localDate,
+  openEditCardDialog,
+  openNewCardDialog,
+} from "./support";
 
 test.describe("Tags, Priorities, and Due Dates", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector('text="Vibe Coding Kanban"');
+  test("should display tag options when creating a card", async ({ board: page }) => {
+    await openNewCardDialog(page);
+
+    // Every new user starts with these default tags
+    for (const tag of ["Bug", "Feature", "Urgent", "Enhancement", "Documentation", "Design"]) {
+      await expect(dialog(page).getByRole("button", { name: tag, exact: true })).toBeVisible();
+    }
   });
 
-  test("should display tag options when creating a card", async ({ page }) => {
-    // Click Add Card button
-    const addCardButtons = page.locator('button:has-text("Add Card")');
-    await addCardButtons.first().click();
+  test("should create a card with tags, priority, and due date", async ({ board: page }) => {
+    const tomorrow = localDate(1);
 
-    // Wait for dialog to open
-    await expect(page.locator('text="Create New Card"')).toBeVisible();
-
-    // Check that tags are loaded
-    await expect(page.locator('text="Bug"')).toBeVisible();
-    await expect(page.locator('text="Feature"')).toBeVisible();
-    await expect(page.locator('text="Urgent"')).toBeVisible();
-  });
-
-  test("should create a card with tags, priority, and due date", async ({ page }) => {
-    // Open card creation dialog
-    const addCardButtons = page.locator('button:has-text("Add Card")');
-    await addCardButtons.first().click();
-
-    await expect(page.locator('text="Create New Card"')).toBeVisible();
-
-    // Fill in title
-    await page.fill('input[placeholder="Enter card title..."]', "Test Task with Tags");
-
-    // Select priority
-    await page.selectOption('select#priority', 'high');
-
-    // Set due date
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const dateStr = tomorrow.toISOString().split('T')[0];
-    await page.fill('input#dueDate', dateStr);
-
-    // Select tags - wait for tags to load and be clickable
-    await page.waitForSelector('button:has-text("Bug")', { state: 'visible' });
-    await page.click('button:has-text("Bug")');
-    await page.click('button:has-text("Feature")');
-
-    // Create the card
-    await page.click('button:has-text("Create")');
-
-    // Wait for dialog to close and card to appear
-    await expect(page.locator('text="Test Task with Tags"')).toBeVisible();
-
-    // Verify tag badges are displayed
-    await expect(page.locator('text="Bug"').first()).toBeVisible();
-    await expect(page.locator('text="Feature"').first()).toBeVisible();
-
-    // Verify due date is displayed
-    const expectedDate = tomorrow.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    await expect(page.locator(`text="${expectedDate}"`)).toBeVisible();
-  });
-
-  test("should display priority with colored border", async ({ page }) => {
-    // Create a high priority card
-    const addCardButtons = page.locator('button:has-text("Add Card")');
-    await addCardButtons.first().click();
-
-    await page.fill('input[placeholder="Enter card title..."]', "High Priority Task");
-    await page.selectOption('select#priority', 'high');
-    await page.click('button:has-text("Create")');
-
-    await expect(page.locator('text="High Priority Task"')).toBeVisible();
-
-    // Check for red left border (high priority)
-    const card = page.locator('text="High Priority Task"').locator('..');
-    const borderClass = await card.evaluate((el) => {
-      const classes = Array.from(el.classList);
-      return classes.find((c) => c.includes('border-l'));
+    const created = await createCard(page, {
+      title: "Test Task with Tags",
+      priority: "high",
+      dueDate: tomorrow.value,
+      tags: ["Bug", "Feature"],
     });
 
-    expect(borderClass).toContain('border-l');
+    await expect(created.getByText("Bug", { exact: true })).toBeVisible();
+    await expect(created.getByText("Feature", { exact: true })).toBeVisible();
+    await expect(created.getByTitle("Due date")).toHaveText(tomorrow.label);
+    await expect(created.locator(".border-l-destructive")).toHaveCount(1);
   });
 
-  test("should edit card and update tags", async ({ page }) => {
-    // Create a card first
-    const addCardButtons = page.locator('button:has-text("Add Card")');
-    await addCardButtons.first().click();
+  test("should display priority with colored border", async ({ board: page }) => {
+    // Priority colors use theme tokens: high = destructive, medium = primary, low = muted
+    const high = await createCard(page, { title: "High Priority Task", priority: "high" });
+    const medium = await createCard(page, { title: "Medium Priority Task" });
+    const low = await createCard(page, { title: "Low Priority Task", priority: "low" });
 
-    await page.fill('input[placeholder="Enter card title..."]', "Editable Task");
-    await page.click('button:has-text("Bug")');
-    await page.click('button:has-text("Create")');
-
-    await expect(page.locator('text="Editable Task"')).toBeVisible();
-
-    // Hover over card to show edit button
-    const card = page.locator('text="Editable Task"').locator('..');
-    await card.hover();
-
-    // Click edit button
-    await page.click('[aria-label="Edit card"]');
-
-    // Wait for edit dialog
-    await expect(page.locator('text="Edit Card"')).toBeVisible();
-
-    // Deselect Bug tag
-    await page.click('button:has-text("Bug")');
-
-    // Select Feature tag instead
-    await page.click('button:has-text("Feature")');
-
-    // Update priority
-    await page.selectOption('select#priority', 'low');
-
-    // Save changes
-    await page.click('button:has-text("Update")');
-
-    // Verify changes
-    await expect(page.locator('text="Editable Task"')).toBeVisible();
-
-    // Feature tag should be visible, Bug should not
-    const cardElement = page.locator('text="Editable Task"').locator('..').locator('..');
-    await expect(cardElement.locator('text="Feature"')).toBeVisible();
+    await expect(high.locator(".border-l-destructive")).toHaveCount(1);
+    await expect(medium.locator(".border-l-primary")).toHaveCount(1);
+    await expect(low.locator(".border-l-muted")).toHaveCount(1);
   });
 
-  test("should show overdue indicator for past due dates", async ({ page }) => {
-    // Create a card with yesterday's date
-    const addCardButtons = page.locator('button:has-text("Add Card")');
-    await addCardButtons.first().click();
+  test("should edit card and update tags", async ({ board: page }) => {
+    await createCard(page, { title: "Editable Task", tags: ["Bug"] });
 
-    await page.fill('input[placeholder="Enter card title..."]', "Overdue Task");
+    await openEditCardDialog(page, "Editable Task");
+    // Swap Bug for Feature and lower the priority
+    await fillCardFields(page, { toggleTags: ["Bug", "Feature"], priority: "low" });
+    await dialog(page).getByRole("button", { name: "Update", exact: true }).click();
+    await expect(dialog(page)).toBeHidden();
 
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const dateStr = yesterday.toISOString().split('T')[0];
-    await page.fill('input#dueDate', dateStr);
-
-    await page.click('button:has-text("Create")');
-
-    await expect(page.locator('text="Overdue Task"')).toBeVisible();
-
-    // Check for red/overdue styling
-    const dueDateElement = page.locator('text="Overdue Task"')
-      .locator('..')
-      .locator('..')
-      .locator('[class*="text-red"]');
-
-    await expect(dueDateElement).toBeVisible();
+    const edited = card(page, "Editable Task");
+    await expect(edited.getByText("Feature", { exact: true })).toBeVisible();
+    await expect(edited.getByText("Bug", { exact: true })).toHaveCount(0);
+    await expect(edited.locator(".border-l-muted")).toHaveCount(1);
   });
 
-  test("should filter cards by multiple tags", async ({ page }) => {
-    // Create multiple cards with different tags
+  test("should show overdue indicator for past due dates", async ({ board: page }) => {
+    const overdue = await createCard(page, { title: "Overdue Task", dueDate: localDate(-1).value });
+    const today = await createCard(page, { title: "Due Today Task", dueDate: localDate(0).value });
+    const future = await createCard(page, { title: "Future Task", dueDate: localDate(3).value });
+
+    await expect(overdue.getByTitle("Overdue!")).toHaveClass(/text-destructive/);
+    await expect(today.getByTitle("Due today")).toHaveClass(/text-primary/);
+    await expect(future.getByTitle("Due date")).not.toHaveClass(/text-destructive|text-primary/);
+  });
+
+  test("should show each card's own combination of tags", async ({ board: page }) => {
     const cards = [
       { title: "Bug Card", tags: ["Bug"] },
       { title: "Feature Card", tags: ["Feature"] },
       { title: "Both Tags Card", tags: ["Bug", "Feature"] },
     ];
 
-    for (const card of cards) {
-      const addCardButtons = page.locator('button:has-text("Add Card")');
-      await addCardButtons.first().click();
-
-      await page.fill('input[placeholder="Enter card title..."]', card.title);
-
-      for (const tag of card.tags) {
-        await page.click(`button:has-text("${tag}")`);
-      }
-
-      await page.click('button:has-text("Create")');
-      await expect(page.locator(`text="${card.title}"`)).toBeVisible();
+    for (const c of cards) {
+      await createCard(page, c);
     }
 
-    // Verify all cards are visible with their tags
-    await expect(page.locator('text="Bug Card"')).toBeVisible();
-    await expect(page.locator('text="Feature Card"')).toBeVisible();
-    await expect(page.locator('text="Both Tags Card"')).toBeVisible();
+    for (const c of cards) {
+      const el = card(page, c.title);
+      for (const tag of ["Bug", "Feature"]) {
+        await expect(el.getByText(tag, { exact: true })).toHaveCount(c.tags.includes(tag) ? 1 : 0);
+      }
+    }
   });
 
-  test("should persist tags and priority after page reload", async ({ page }) => {
-    // Create a card with specific tags and priority
-    const addCardButtons = page.locator('button:has-text("Add Card")');
-    await addCardButtons.first().click();
+  test("should persist tags and priority after page reload", async ({ board: page }) => {
+    await createCard(page, { title: "Persistent Card", priority: "high", tags: ["Urgent"] });
 
-    await page.fill('input[placeholder="Enter card title..."]', "Persistent Card");
-    await page.selectOption('select#priority', 'high');
-    await page.click('button:has-text("Urgent")');
-    await page.click('button:has-text("Create")');
-
-    await expect(page.locator('text="Persistent Card"')).toBeVisible();
-
-    // Reload the page
     await page.reload();
-    await page.waitForSelector('text="Vibe Coding Kanban"');
 
-    // Verify card still exists with tags
-    await expect(page.locator('text="Persistent Card"')).toBeVisible();
-
-    const cardElement = page.locator('text="Persistent Card"').locator('..').locator('..');
-    await expect(cardElement.locator('text="Urgent"')).toBeVisible();
+    const persisted = card(page, "Persistent Card");
+    await expect(persisted).toBeVisible();
+    await expect(persisted.getByText("Urgent", { exact: true })).toBeVisible();
+    await expect(persisted.locator(".border-l-destructive")).toHaveCount(1);
   });
 
-  test("should display comment count alongside tags", async ({ page }) => {
-    // Create a card
-    const addCardButtons = page.locator('button:has-text("Add Card")');
-    await addCardButtons.first().click();
+  test("should display comment count alongside tags", async ({ board: page }) => {
+    await createCard(page, { title: "Card with Comment", tags: ["Bug"] });
 
-    await page.fill('input[placeholder="Enter card title..."]', "Card with Comment");
-    await page.click('button:has-text("Bug")');
-    await page.click('button:has-text("Create")');
+    await openEditCardDialog(page, "Card with Comment");
+    await dialog(page).getByPlaceholder("Add a comment...").fill("Test comment");
+    await dialog(page).getByRole("button", { name: "Add Comment" }).click();
+    await expect(dialog(page).getByText("Test comment")).toBeVisible();
 
-    await expect(page.locator('text="Card with Comment"')).toBeVisible();
+    await dialog(page).getByRole("button", { name: "Update", exact: true }).click();
+    await expect(dialog(page)).toBeHidden();
 
-    // Edit the card to add a comment
-    const card = page.locator('text="Card with Comment"').locator('..');
-    await card.hover();
-    await page.click('[aria-label="Edit card"]');
-
-    await expect(page.locator('text="Edit Card"')).toBeVisible();
-
-    // Add a comment
-    await page.fill('textarea[placeholder="Add a comment..."]', "Test comment");
-    await page.click('button:has-text("Add Comment")');
-
-    // Wait for comment to be added
-    await expect(page.locator('text="Test comment"')).toBeVisible();
-
-    // Close dialog
-    await page.click('button:has-text("Update")');
-
-    // Verify comment count is displayed (should show "1")
-    const cardWithComment = page.locator('text="Card with Comment"').locator('..').locator('..');
-    await expect(cardWithComment.locator('text="1"')).toBeVisible();
+    const withComment = card(page, "Card with Comment");
+    await expect(withComment.getByText("Bug", { exact: true })).toBeVisible();
+    await expect(withComment.getByText("1", { exact: true })).toBeVisible();
   });
 
-  test("should allow changing priority from medium to high", async ({ page }) => {
-    // Create a card with medium priority (default)
-    const addCardButtons = page.locator('button:has-text("Add Card")');
-    await addCardButtons.first().click();
+  test("should allow changing priority from medium to high", async ({ board: page }) => {
+    const created = await createCard(page, { title: "Priority Change Task" });
+    await expect(created.locator(".border-l-primary")).toHaveCount(1);
 
-    await page.fill('input[placeholder="Enter card title..."]', "Priority Change Task");
-    await page.click('button:has-text("Create")');
+    await openEditCardDialog(page, "Priority Change Task");
+    await expect(dialog(page).locator("select#priority")).toHaveValue("medium");
+    await fillCardFields(page, { priority: "high" });
+    await dialog(page).getByRole("button", { name: "Update", exact: true }).click();
+    await expect(dialog(page)).toBeHidden();
 
-    await expect(page.locator('text="Priority Change Task"')).toBeVisible();
-
-    // Edit the card
-    const card = page.locator('text="Priority Change Task"').locator('..');
-    await card.hover();
-    await page.click('[aria-label="Edit card"]');
-
-    // Change priority to high
-    await page.selectOption('select#priority', 'high');
-    await page.click('button:has-text("Update")');
-
-    // Card should now have red border
-    await expect(page.locator('text="Priority Change Task"')).toBeVisible();
+    await expect(card(page, "Priority Change Task").locator(".border-l-destructive")).toHaveCount(1);
   });
 });

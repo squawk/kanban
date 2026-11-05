@@ -148,3 +148,8 @@ prisma/dev.db*
 .dev.vars*
 !.dev.vars.example
 .wrangler/
+
+# Playwright
+e2e/.auth/
+playwright-report/
+test-results/

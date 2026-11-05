@@ -30,4 +30,11 @@ export default defineConfig({
     reactRouter(),
     tsconfigPaths(),
   ],
+  optimizeDeps: {
+    // Scan every route and component for client dependencies at startup. Otherwise the
+    // dev server discovers some only on the first page load, re-optimizes, and the
+    // browser ends up mixing chunks from both builds (two Reacts: "Cannot read
+    // properties of null (reading 'useContext')").
+    entries: ["app/**/*.tsx", "!app/**/*.test.tsx"],
+  },
 });

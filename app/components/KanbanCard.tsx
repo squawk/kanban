@@ -62,6 +62,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy 
       ref={setNodeRef}
       style={style}
       className={`group ${isDragging ? "opacity-50" : ""}`}
+      data-testid="kanban-card"
       {...attributes}
       {...listeners}
     >
