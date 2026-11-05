@@ -2,7 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { KanbanCard as KanbanCardType, UserSummary } from "~/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { MessageSquare, Calendar, Lock } from "lucide-react";
+import { MessageSquare, Calendar, Lock, ArrowUpRight } from "lucide-react";
 import { UserAvatar } from "./UserAvatar";
 
 interface KanbanCardProps {
@@ -68,9 +68,21 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy 
       <Card className={`mb-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:scale-[1.02] bg-card border-2 border-border border-l-8 ${getPriorityColor(card.priority)}`}>
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">
-            <CardTitle className="text-sm font-semibold text-foreground line-clamp-2">
-              {card.title}
-            </CardTitle>
+            <div className="min-w-0">
+              <CardTitle className="text-sm font-semibold text-foreground line-clamp-2">
+                {card.title}
+              </CardTitle>
+              {card.linkedFrom && (
+                <p
+                  className="mt-1 inline-flex items-center gap-0.5 text-xs text-muted-foreground"
+                  title={`This card lives on ${card.linkedFrom.boardName}. It shows here because it's assigned to you; moving it here moves it there too.`}
+                  data-testid="card-linked-from"
+                >
+                  <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
+                  {card.linkedFrom.boardName}
+                </p>
+              )}
+            </div>
             <div className="flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
               <button
                 onClick={(e) => {

@@ -98,6 +98,8 @@ export function KanbanBoard({
   const isOwner = !board.board || board.board.role === "owner";
   const members: BoardMember[] = board.members ?? [];
   const isShared = members.length > 1;
+  // Cards assigned to you on other boards also appear here (see /api/board)
+  const hasLinkedCards = Object.values(board.cards).some((c) => c.linkedFrom);
 
   // Load board from database on mount / when switching boards
   useEffect(() => {
@@ -285,7 +287,9 @@ export function KanbanBoard({
   lockRecheckRef.current = isCardDialogOpen && editingCard ? cardLock.recheck : null;
 
   useEffect(() => {
-    if (!isShared) return;
+    // Linked cards change on their own board, which this board's live channel doesn't
+    // cover, so poll for those too
+    if (!isShared && !hasLinkedCards) return;
     const interval = liveStatus === "live" ? LIVE_REFRESH_INTERVAL_MS : REFRESH_INTERVAL_MS;
     const id = window.setInterval(refresh, interval);
     const onVisible = () => {
@@ -296,16 +300,35 @@ export function KanbanBoard({
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [isShared, liveStatus, refresh]);
+  }, [isShared, hasLinkedCards, liveStatus, refresh]);
 
-  const saveColumns = (newColumns: KanbanBoardType["columns"]) =>
-    apiFetch("/api/board", {
+  const saveColumns = (newColumns: KanbanBoardType["columns"]) => {
+    // Linked cards belong to another board; their position here isn't saved
+    const own = newColumns.map((col) => ({ ...col, cardIds: col.cardIds.filter((id) => !board.cards[id]?.linkedFrom) }));
+    return apiFetch("/api/board", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        resolvedBoardId ? { boardId: resolvedBoardId, columns: newColumns } : { columns: newColumns }
-      ),
+      body: JSON.stringify(resolvedBoardId ? { boardId: resolvedBoardId, columns: own } : { columns: own }),
     });
+  };
+
+  /** Move a card that lives on another board to the column with the same name there. */
+  const moveLinkedCard = async (cardId: string, columnTitle: string): Promise<boolean> => {
+    try {
+      const res = await apiFetch(`/api/cards/${encodeURIComponent(cardId)}/move`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columnTitle }),
+      });
+      if (res.ok) return true;
+      const data = await res.json().catch(() => ({}));
+      showToast({ tone: "error", message: data.error || "Couldn't move that card" });
+    } catch {
+      showToast({ tone: "error", message: "Couldn't move that card. Check your connection." });
+    }
+    await fetchBoard(); // put it back where it really is
+    return false;
+  };
 
   const fetchArchivedCount = async () => {
     try {
@@ -417,8 +440,12 @@ export function KanbanBoard({
         columns: newColumns,
       }));
 
-      // Save to database
-      await saveColumns(newColumns);
+      // Save to database (a linked card moves on its own board instead)
+      if (board.cards[activeId]?.linkedFrom) {
+        if (!(await moveLinkedCard(activeId, overColumn.title))) return;
+      } else {
+        await saveColumns(newColumns);
+      }
 
       // Trigger confetti if card is moved to completed column (check by title)
       console.log(`Move detected: from "${activeColumn.title}" to "${overColumn.title}"`);
@@ -481,8 +508,12 @@ export function KanbanBoard({
     }));
     setTargetColumnId(newColumnId);
 
-    // Save to database
-    await saveColumns(newColumns);
+    // Save to database (a linked card moves on its own board instead)
+    if (editingCard.linkedFrom) {
+      if (!(await moveLinkedCard(editingCard.id, destColumn.title))) return;
+    } else {
+      await saveColumns(newColumns);
+    }
 
     // Trigger confetti if card is moved to completed column
     if (destColumn.title.toLowerCase() === "completed" && sourceColumn.title.toLowerCase() !== "completed") {
