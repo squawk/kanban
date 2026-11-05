@@ -1,4 +1,5 @@
 import { api, requireCardAccess, requireUser } from "~/lib/access.server";
+import { cardRef } from "~/lib/card-privacy";
 import { acquireCardLock, LOCK_RENEW_MS, LOCK_TTL_MS, releaseCardLock } from "~/lib/card-locks.server";
 import { json, jsonError, readJson } from "~/lib/http";
 import { logAudit } from "~/lib/audit.server";
@@ -32,7 +33,7 @@ export const action = api("update card lock", async ({ request, params }: Args) 
         entityType: "card",
         entityId: card.id,
         boardId: card.boardId,
-        summary: `Took over editing "${card.title}"`,
+        summary: `Took over editing ${cardRef(card)}`,
         metadata: { previousHolderId: result.previousHolderId },
         request,
       });

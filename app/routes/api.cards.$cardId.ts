@@ -2,6 +2,7 @@ import { db } from "~/lib/db";
 import { cards, columns } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { api, isBoardParticipant, requireCardAccess, requireUser } from "~/lib/access.server";
+import { cardRef } from "~/lib/card-privacy";
 import { filterValidTagIds, serializeCards } from "~/lib/board-serialize.server";
 import { json, jsonError, readJson } from "~/lib/http";
 import { INPUT_LIMITS } from "~/lib/security";
@@ -32,9 +33,10 @@ export const action = api(
         priority?: string;
         tagIds?: unknown;
         assigneeId?: string | null;
+        isPrivate?: boolean;
         expectedVersion?: number;
       }>(request);
-      const { title, notes, generatedPrompt, dueDate, priority, tagIds, assigneeId } = body;
+      const { title, notes, generatedPrompt, dueDate, priority, tagIds, assigneeId, isPrivate } = body;
 
       // Only the lock holder may edit. Saving an AI-generated prompt doesn't touch the
       // fields being edited, so it's allowed while someone else has the card open.
@@ -48,6 +50,13 @@ export const action = api(
         return jsonError(`Notes must be ${INPUT_LIMITS.cardNotes} characters or less`, 400);
       }
       if (priority !== undefined && !PRIORITIES.includes(priority)) return jsonError("Invalid priority", 400);
+      if (isPrivate !== undefined && typeof isPrivate !== "boolean") return jsonError("Invalid isPrivate", 400);
+      if (isPrivate !== undefined && isPrivate !== card.isPrivate && card.createdById !== user.id) {
+        return jsonError("Only the person who created this card can change who sees it", 403);
+      }
+      if (assigneeId && (isPrivate ?? card.isPrivate)) {
+        return jsonError("A private card can't be assigned. Make it visible to the board first.", 400);
+      }
       if (assigneeId && !await isBoardParticipant(card.boardId, assigneeId)) {
         return jsonError("Assignee must be a member of this board", 400);
       }
@@ -65,6 +74,7 @@ export const action = api(
           ...(dueDate !== undefined && { dueDate: dueDate ? new Date(dueDate) : null }),
           ...(priority !== undefined && { priority }),
           ...(assigneeId !== undefined && { assigneeId: assigneeId || null }),
+          ...(isPrivate !== undefined && { isPrivate }),
           ...(tagIds !== undefined && { tagIds: await filterValidTagIds(tagIds) }),
         },
       });
@@ -95,7 +105,7 @@ export const action = api(
         entityType: "card",
         entityId: cardId,
         boardId: card.boardId,
-        summary: `Archived "${card.title}"`,
+        summary: `Archived ${cardRef(card)}`,
         request,
       });
 

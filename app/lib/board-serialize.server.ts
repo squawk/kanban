@@ -67,6 +67,7 @@ export async function serializeCards(cardRows: Card[], opts: { includeComments?:
       dueDate: card.dueDate ? card.dueDate.toISOString() : undefined,
       priority: card.priority,
       assigneeId: card.assigneeId ?? null,
+      isPrivate: card.isPrivate,
       version: versionOf.get(card.id) ?? 0,
       assignee,
       createdBy,

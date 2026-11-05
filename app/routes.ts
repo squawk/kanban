@@ -46,6 +46,7 @@ export default [
   route("api/cards/:cardId/activity", "routes/api.cards.$cardId.activity.ts"),
   route("api/cards/:cardId/lock", "routes/api.cards.$cardId.lock.ts"),
   route("api/cards/:cardId/revisions", "routes/api.cards.$cardId.revisions.ts"),
+  route("api/cards/:cardId/move", "routes/api.cards.$cardId.move.ts"),
   route("api/columns", "routes/api.columns.ts"),
   route("api/columns/:columnId", "routes/api.columns.$columnId.ts"),
   route("api/tags", "routes/api.tags.ts"),

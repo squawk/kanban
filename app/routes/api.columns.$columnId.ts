@@ -18,7 +18,9 @@ export const action = api(
 
     const cardIdsList = JSON.parse(column.cardIds) as string[];
     const deletedTitles = cardIdsList.length
-      ? (await db.select({ title: cards.title }).from(cards).where(inArray(cards.id, cardIdsList))).map((c) => c.title)
+      ? (await db.select({ title: cards.title, isPrivate: cards.isPrivate }).from(cards).where(inArray(cards.id, cardIdsList))).map(
+          (c) => (c.isPrivate ? "(private card)" : c.title)
+        )
       : [];
 
     await db.transaction(async (tx) => {

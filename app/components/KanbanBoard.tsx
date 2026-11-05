@@ -28,7 +28,10 @@ import type {
   UserSummary,
   CurrentUser,
 } from "~/lib/types";
+import { computeBoardPulse, type SpotlightKind } from "~/lib/board-pulse";
+import { BoardPulse } from "./BoardPulse";
 import { apiFetch } from "~/lib/api";
+import { COMBINED_BOARD_ID } from "~/lib/linked-cards";
 import { useCardLock } from "~/lib/use-card-lock";
 import {
   subscribeToBoard,
@@ -66,6 +69,7 @@ export function KanbanBoard({
 }: KanbanBoardProps = {}) {
   const [board, setBoard] = useState<KanbanBoardType>({ columns: [], cards: {} });
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("all");
+  const [spotlight, setSpotlight] = useState<SpotlightKind | null>(null);
   const [isMembersDialogOpen, setIsMembersDialogOpen] = useState(false);
   const [isAiQuickAddOpen, setIsAiQuickAddOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -98,6 +102,10 @@ export function KanbanBoard({
   const isOwner = !board.board || board.board.role === "owner";
   const members: BoardMember[] = board.members ?? [];
   const isShared = members.length > 1;
+  // The combined view of every board you can open (read-only layout; cards move on their own boards)
+  const isCombined = boardId === COMBINED_BOARD_ID;
+  // Cards assigned to you on other boards also appear here (see /api/board)
+  const hasLinkedCards = Object.values(board.cards).some((c) => c.linkedFrom);
 
   // Load board from database on mount / when switching boards
   useEffect(() => {
@@ -285,7 +293,9 @@ export function KanbanBoard({
   lockRecheckRef.current = isCardDialogOpen && editingCard ? cardLock.recheck : null;
 
   useEffect(() => {
-    if (!isShared) return;
+    // Linked cards change on their own board, which this board's live channel doesn't
+    // cover, so poll for those too
+    if (!isShared && !hasLinkedCards) return;
     const interval = liveStatus === "live" ? LIVE_REFRESH_INTERVAL_MS : REFRESH_INTERVAL_MS;
     const id = window.setInterval(refresh, interval);
     const onVisible = () => {
@@ -296,18 +306,38 @@ export function KanbanBoard({
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [isShared, liveStatus, refresh]);
+  }, [isShared, hasLinkedCards, liveStatus, refresh]);
 
-  const saveColumns = (newColumns: KanbanBoardType["columns"]) =>
-    apiFetch("/api/board", {
+  const saveColumns = (newColumns: KanbanBoardType["columns"]) => {
+    // Linked cards belong to another board; their position here isn't saved
+    const own = newColumns.map((col) => ({ ...col, cardIds: col.cardIds.filter((id) => !board.cards[id]?.linkedFrom) }));
+    return apiFetch("/api/board", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        resolvedBoardId ? { boardId: resolvedBoardId, columns: newColumns } : { columns: newColumns }
-      ),
+      body: JSON.stringify(resolvedBoardId ? { boardId: resolvedBoardId, columns: own } : { columns: own }),
     });
+  };
+
+  /** Move a card that lives on another board to the column with the same name there. */
+  const moveLinkedCard = async (cardId: string, columnTitle: string): Promise<boolean> => {
+    try {
+      const res = await apiFetch(`/api/cards/${encodeURIComponent(cardId)}/move`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columnTitle }),
+      });
+      if (res.ok) return true;
+      const data = await res.json().catch(() => ({}));
+      showToast({ tone: "error", message: data.error || "Couldn't move that card" });
+    } catch {
+      showToast({ tone: "error", message: "Couldn't move that card. Check your connection." });
+    }
+    await fetchBoard(); // put it back where it really is
+    return false;
+  };
 
   const fetchArchivedCount = async () => {
+    if (boardId === COMBINED_BOARD_ID) return;
     try {
       const response = await apiFetch(`/api/archived-cards${boardQuery}`);
       if (response.ok) {
@@ -417,8 +447,12 @@ export function KanbanBoard({
         columns: newColumns,
       }));
 
-      // Save to database
-      await saveColumns(newColumns);
+      // Save to database (a linked card moves on its own board instead)
+      if (board.cards[activeId]?.linkedFrom) {
+        if (!(await moveLinkedCard(activeId, overColumn.title))) return;
+      } else {
+        await saveColumns(newColumns);
+      }
 
       // Trigger confetti if card is moved to completed column (check by title)
       console.log(`Move detected: from "${activeColumn.title}" to "${overColumn.title}"`);
@@ -481,8 +515,12 @@ export function KanbanBoard({
     }));
     setTargetColumnId(newColumnId);
 
-    // Save to database
-    await saveColumns(newColumns);
+    // Save to database (a linked card moves on its own board instead)
+    if (editingCard.linkedFrom) {
+      if (!(await moveLinkedCard(editingCard.id, destColumn.title))) return;
+    } else {
+      await saveColumns(newColumns);
+    }
 
     // Trigger confetti if card is moved to completed column
     if (destColumn.title.toLowerCase() === "completed" && sourceColumn.title.toLowerCase() !== "completed") {
@@ -502,6 +540,7 @@ export function KanbanBoard({
     priority: 'low' | 'medium' | 'high';
     tagIds: string[];
     assigneeId?: string | null;
+    isPrivate?: boolean;
   }): Promise<boolean> => {
     setSaveError(undefined);
     setSaveConflict(false);
@@ -518,6 +557,7 @@ export function KanbanBoard({
             priority: data.priority,
             tagIds: data.tagIds,
             ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId }),
+            ...(data.isPrivate !== undefined && { isPrivate: data.isPrivate }),
             // The version this editor loaded: the server refuses the save if someone saved since
             ...(editingCard.version !== undefined && { expectedVersion: editingCard.version }),
           }),
@@ -568,6 +608,7 @@ export function KanbanBoard({
             tagIds: data.tagIds,
             columnId: targetColumnId,
             ...(data.assigneeId && { assigneeId: data.assigneeId }),
+            ...(data.isPrivate && { isPrivate: true }),
           }),
         });
 
@@ -743,6 +784,21 @@ export function KanbanBoard({
   // Default column titles that cannot be deleted
   const defaultColumnTitles = ["to do", "in progress", "completed"];
 
+  // Columns with the assignee filter applied; the pulse and the lanes both use these
+  const visibleColumns = board.columns.map((column) => ({
+    ...column,
+    cardIds: column.cardIds.filter((id) => {
+      const card = board.cards[id];
+      if (!card) return false;
+      return assigneeFilter === "all"
+        ? true
+        : assigneeFilter === "mine"
+          ? card.assigneeId === currentUser?.id
+          : !card.assigneeId;
+    }),
+  }));
+  const pulse = computeBoardPulse({ columns: visibleColumns, cards: board.cards }, { currentUserId: currentUser?.id });
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center py-20">
@@ -761,8 +817,10 @@ export function KanbanBoard({
           <div className="min-w-0">
             {board.board && (
               <h2 className="text-lg font-semibold text-foreground truncate" data-testid="board-name">
-                {board.board.name}
-                {!isOwner && (
+                {board.board.displayName ?? board.board.name}
+                {isCombined ? (
+                  <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">every board you can open</span>
+                ) : !isOwner && (
                   <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">shared with you</span>
                 )}
                 {liveStatus === "live" && (
@@ -777,9 +835,6 @@ export function KanbanBoard({
                 )}
               </h2>
             )}
-            <p className="hidden sm:block text-muted-foreground">
-              Organize your projects with style
-            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {members.length > 0 && (
@@ -841,16 +896,19 @@ export function KanbanBoard({
                   <option value="mine">Assigned to me</option>
                   <option value="unassigned">Unassigned</option>
                 </select>
-                <Button variant="outline" onClick={() => setIsMembersDialogOpen(true)}>
-                  <Users className="h-4 w-4 mr-2" />
-                  {isOwner ? "Share" : "Members"}
-                </Button>
+                {!isCombined && (
+                  <Button variant="outline" onClick={() => setIsMembersDialogOpen(true)}>
+                    <Users className="h-4 w-4 mr-2" />
+                    {isOwner ? "Share" : "Members"}
+                  </Button>
+                )}
               </div>
             )}
             <Button variant="outline" onClick={() => setIsAiQuickAddOpen(true)} data-testid="ai-quick-add-button">
               <Sparkles className="h-4 w-4 mr-2" aria-hidden="true" />
               Quick add
             </Button>
+            {!isCombined && (<>
             <Button
               variant="outline"
               onClick={() => setIsArchivedDialogOpen(true)}
@@ -883,8 +941,16 @@ export function KanbanBoard({
               </svg>
               Add Column
             </Button>
+            </>)}
           </div>
         </div>
+
+        <BoardPulse
+          pulse={pulse}
+          spotlight={spotlight}
+          onSpotlightChange={setSpotlight}
+          showMine={!!currentUser}
+        />
 
         <DndContext
           sensors={sensors}
@@ -892,22 +958,16 @@ export function KanbanBoard({
           onDragEnd={handleDragEnd}
         >
           <div className="flex gap-4 sm:gap-6 overflow-x-auto pb-4 -mx-4 px-4 sm:mx-0 sm:px-0">
-            {board.columns.map((column) => (
+            {visibleColumns.map((column, i) => (
               <KanbanColumn
                 key={column.id}
                 column={column}
-                cards={column.cardIds
-                  .map((id) => board.cards[id])
-                  .filter(Boolean)
-                  .filter((card) =>
-                    assigneeFilter === "all"
-                      ? true
-                      : assigneeFilter === "mine"
-                        ? card.assigneeId === currentUser?.id
-                        : !card.assigneeId
-                  )}
+                hue={pulse.lanes[i]?.hue}
+                spotlight={spotlight}
+                cards={column.cardIds.map((id) => board.cards[id]).filter(Boolean)}
                 lockedByOther={lockedByOther}
-                onAddCard={handleAddCard}
+                onAddCard={isCombined ? undefined : handleAddCard}
+                currentUserId={currentUser?.id}
                 onEditCard={handleEditCard}
                 onDeleteCard={handleDeleteCard}
                 onGeneratePrompt={handleGeneratePrompt}
@@ -935,7 +995,7 @@ export function KanbanBoard({
       <AiQuickAddDialog
         open={isAiQuickAddOpen}
         onOpenChange={setIsAiQuickAddOpen}
-        boardId={resolvedBoardId}
+        boardId={isCombined ? undefined : resolvedBoardId}
         onCreated={async () => {
           await fetchBoard();
         }}

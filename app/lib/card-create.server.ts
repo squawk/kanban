@@ -13,6 +13,7 @@ import { INPUT_LIMITS } from "./security";
 import { logAudit } from "./audit.server";
 import { notifyCardAssigned } from "./notifications.server";
 import { recordInitialRevision } from "./card-update.server";
+import { cardRef } from "./card-privacy";
 
 export const PRIORITIES = ["low", "medium", "high"] as const;
 
@@ -24,6 +25,8 @@ export interface NewCardInput {
   priority?: string;
   tagIds?: unknown;
   assigneeId?: string | null;
+  /** Only the creator will see it; can't be combined with an assignee */
+  isPrivate?: boolean;
 }
 
 /** Create a card; throws a JSON error `Response` on invalid input or missing access. */
@@ -33,7 +36,9 @@ export async function createCard(
   request: Request,
   audit: { via?: string } = {},
 ) {
-  const { title, notes, columnId, dueDate, priority, tagIds, assigneeId } = input;
+  const { title, notes, columnId, dueDate, priority, tagIds } = input;
+  const isPrivate = input.isPrivate === true;
+  const assigneeId = isPrivate ? null : input.assigneeId;
 
   if (!title || !columnId) throw jsonError("Title and columnId are required", 400);
   if (title.length > INPUT_LIMITS.cardTitle) throw jsonError(`Title must be ${INPUT_LIMITS.cardTitle} characters or less`, 400);
@@ -62,6 +67,7 @@ export async function createCard(
         boardId,
         assigneeId: assigneeId || null,
         createdById: user.id,
+        isPrivate,
         createdAt: now,
         updatedAt: now,
       });
@@ -88,8 +94,14 @@ export async function createCard(
     entityType: "card",
     entityId: cardId,
     boardId,
-    summary: `Created "${title}" in ${column.title}${audit.via ? ` (${audit.via})` : ""}`,
-    metadata: { columnId, assigneeId: assigneeId || null, priority: newCard.priority, ...(audit.via && { via: audit.via }) },
+    summary: `Created ${cardRef(newCard)} in ${column.title}${audit.via ? ` (${audit.via})` : ""}`,
+    metadata: {
+      columnId,
+      assigneeId: assigneeId || null,
+      priority: newCard.priority,
+      ...(isPrivate && { private: true }),
+      ...(audit.via && { via: audit.via }),
+    },
     request,
   });
 

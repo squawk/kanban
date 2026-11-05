@@ -32,7 +32,8 @@ test.describe("Tags, Priorities, and Due Dates", () => {
 
     await expect(created.getByText("Bug", { exact: true })).toBeVisible();
     await expect(created.getByText("Feature", { exact: true })).toBeVisible();
-    await expect(created.getByTitle("Due date")).toHaveText(tomorrow.label);
+    // Dates within a day read "Today" / "Tomorrow" instead of "Nov 6"
+    await expect(created.getByTitle("Due date")).toHaveText("Tomorrow");
     await expect(created.locator(".border-l-destructive")).toHaveCount(1);
   });
 

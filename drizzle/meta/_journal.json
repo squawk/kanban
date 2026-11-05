@@ -43,6 +43,13 @@
       "when": 1793826780064,
       "tag": "0005_card_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793909053431,
+      "tag": "0006_private_cards",
+      "breakpoints": true
     }
   ]
 }

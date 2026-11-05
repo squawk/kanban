@@ -193,7 +193,7 @@ describe("KanbanCard with Tags, Priority, and Due Date", () => {
   });
 
   it("should render complete card with all features", () => {
-    const { date: tomorrow, iso: tomorrowIso } = dueDateInDays(1);
+    const { iso: tomorrowIso } = dueDateInDays(1);
 
     const fullCard: KanbanCardType = {
       id: "card-full",
@@ -223,8 +223,24 @@ describe("KanbanCard with Tags, Priority, and Due Date", () => {
     expect(screen.getByText("Feature")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument(); // comment count
 
-    // Check due date is displayed (should be tomorrow's date)
-    const dueDateText = tomorrow.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    expect(screen.getByText(dueDateText)).toBeInTheDocument();
+    // A due date of tomorrow reads "Tomorrow"
+    expect(screen.getByText("Tomorrow")).toBeInTheDocument();
+  });
+});
+
+describe("KanbanCard assigned to someone else", () => {
+  const base: KanbanCardType = { id: "c", title: "T", notes: "", priority: "medium", createdAt: "2024-01-01", updatedAt: "2024-01-01" };
+  const handlers = { onEdit: vi.fn(), onDelete: vi.fn(), onGeneratePrompt: vi.fn() };
+  const renderCard = (card: KanbanCardType, currentUserId?: string) =>
+    render(<DndWrapper><KanbanCard card={card} {...handlers} currentUserId={currentUserId} /></DndWrapper>);
+
+  it("is dimmed when assigned to another person", () => {
+    const { container } = renderCard({ ...base, assigneeId: "luke" }, "brad");
+    expect(container.querySelector("[data-assigned-to-other]")).not.toBeNull();
+  });
+
+  it("is not dimmed when it's yours or unassigned", () => {
+    expect(renderCard({ ...base, assigneeId: "brad" }, "brad").container.querySelector("[data-assigned-to-other]")).toBeNull();
+    expect(renderCard(base, "brad").container.querySelector("[data-assigned-to-other]")).toBeNull();
   });
 });

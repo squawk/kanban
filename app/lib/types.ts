@@ -19,6 +19,10 @@ export interface BoardInfo {
   id: string;
   name: string;
   role: 'owner' | 'member';
+  /** Name to show: "Luke's board" for a shared board that kept the default name */
+  displayName?: string;
+  /** The combined view of every board you can open */
+  combined?: boolean;
 }
 
 export interface BoardListItem {
@@ -26,6 +30,7 @@ export interface BoardListItem {
   name: string;
   role: 'owner' | 'member';
   ownerName: string | null;
+  displayName?: string;
 }
 
 export interface ActivityEntry {
@@ -70,12 +75,16 @@ export interface KanbanCard {
   archivedAt?: string;
   boardId?: string;
   assigneeId?: string | null;
+  /** Only the creator can see it (and it can't be assigned) */
+  isPrivate?: boolean;
   assignee?: UserSummary | null;
   createdBy?: UserSummary | null;
   /** Latest edit-history version (0 = no history yet) */
   version?: number;
   /** Active edit lock (someone has the card open in the edit dialog) */
   lock?: { userId: string; name: string; expiresAt: string } | null;
+  /** Set when the card lives on another board and is shown here because it's assigned to you */
+  linkedFrom?: { boardId: string; boardName: string; columnTitle: string | null };
   createdAt: string;
   updatedAt: string;
 }
