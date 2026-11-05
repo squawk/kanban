@@ -38,6 +38,7 @@ export default [
   route("api/realtime-token", "routes/api.realtime-token.ts"),
   // Board routes
   route("api/generate-prompt", "routes/api.generate-prompt.ts"),
+  route("api/ai/quick-add", "routes/api.ai.quick-add.ts"),
   route("api/board", "routes/api.board.ts"),
   route("api/cards", "routes/api.cards.ts"),
   route("api/cards/:cardId", "routes/api.cards.$cardId.ts"),
