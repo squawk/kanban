@@ -164,4 +164,29 @@ describe("cards assigned to you on another board", () => {
     expect(after.cards[ownId].linkedFrom).toBeUndefined();
     expect(after.columns.flatMap((c) => c.cardIds).filter((id) => id === ownId)).toHaveLength(1);
   });
+
+  it("shows it on the assignee's board to anyone viewing it who can see the card's board", async () => {
+    const assigned = await createCard("Call the printer", adminBoard.columns[0].id, bob.id);
+    const bobBoard = await getBoard(bob.cookie);
+    // Bob shares his board with Brad (who assigned the card) and with Eve (who can't see Brad's board)
+    for (const userId of [admin.id, eve.id]) {
+      const res = await members.action({
+        request: req("/x", { method: "POST", cookie: bob.cookie, body: { userId } }),
+        params: { boardId: bobBoard.board.id },
+      } as never);
+      expect(res.status).toBe(201);
+    }
+
+    const asBrad = await getBoard(admin.cookie, bobBoard.board.id);
+    expect(columnOf(asBrad, assigned)).toBe("To Do");
+    expect(asBrad.cards[assigned].linkedFrom?.boardName).toBe("Your board");
+
+    // Brad can move it from Bob's board too
+    expect((await moveCard(assigned, "Completed", admin.cookie)).status).toBe(200);
+    expect(columnOf(await getBoard(admin.cookie), assigned)).toBe("Completed");
+
+    const asEve = await getBoard(eve.cookie, bobBoard.board.id);
+    expect(asEve.cards[assigned]).toBeUndefined();
+    expect(asEve.columns.flatMap((c) => c.cardIds)).not.toContain(assigned);
+  });
 });
