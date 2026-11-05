@@ -27,7 +27,9 @@ jobs:
 
   e2e:
     name: E2E tests
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is now 26.04, which Playwright 1.56 can't install Chromium on.
+    # Move to ubuntu-latest after upgrading @playwright/test to a release that supports it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
