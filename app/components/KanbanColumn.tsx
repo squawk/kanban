@@ -10,7 +10,10 @@ import { Button } from "./ui/button";
 interface KanbanColumnProps {
   column: KanbanColumnType;
   cards: KanbanCardType[];
-  onAddCard: (columnId: string) => void;
+  /** Omit to hide "Add Card" (e.g. the combined view) */
+  onAddCard?: (columnId: string) => void;
+  /** Cards assigned to someone else are dimmed */
+  currentUserId?: string;
   onEditCard: (card: KanbanCardType) => void;
   onDeleteCard: (cardId: string) => void;
   onGeneratePrompt: (card: KanbanCardType) => void;
@@ -30,6 +33,7 @@ export function KanbanColumn({
   onDeleteColumn,
   isDeletable = false,
   lockedByOther,
+  currentUserId,
 }: KanbanColumnProps) {
   const { setNodeRef } = useDroppable({
     id: column.id,
@@ -86,6 +90,7 @@ export function KanbanColumn({
                 key={card.id}
                 card={card}
                 lockedBy={lockedByOther?.get(card.id)}
+                currentUserId={currentUserId}
                 onEdit={onEditCard}
                 onDelete={onDeleteCard}
                 onGeneratePrompt={onGeneratePrompt}
@@ -94,6 +99,7 @@ export function KanbanColumn({
           </div>
         </SortableContext>
 
+        {onAddCard && (
         <Button
           variant="ghost"
           className="w-full mt-3 text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
@@ -116,6 +122,7 @@ export function KanbanColumn({
           </svg>
           Add Card
         </Button>
+        )}
       </div>
     </div>
   );

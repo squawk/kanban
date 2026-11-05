@@ -29,6 +29,7 @@ import type {
   CurrentUser,
 } from "~/lib/types";
 import { apiFetch } from "~/lib/api";
+import { COMBINED_BOARD_ID } from "~/lib/linked-cards";
 import { useCardLock } from "~/lib/use-card-lock";
 import {
   subscribeToBoard,
@@ -98,6 +99,8 @@ export function KanbanBoard({
   const isOwner = !board.board || board.board.role === "owner";
   const members: BoardMember[] = board.members ?? [];
   const isShared = members.length > 1;
+  // The combined view of every board you can open (read-only layout; cards move on their own boards)
+  const isCombined = boardId === COMBINED_BOARD_ID;
   // Cards assigned to you on other boards also appear here (see /api/board)
   const hasLinkedCards = Object.values(board.cards).some((c) => c.linkedFrom);
 
@@ -331,6 +334,7 @@ export function KanbanBoard({
   };
 
   const fetchArchivedCount = async () => {
+    if (boardId === COMBINED_BOARD_ID) return;
     try {
       const response = await apiFetch(`/api/archived-cards${boardQuery}`);
       if (response.ok) {
@@ -792,8 +796,10 @@ export function KanbanBoard({
           <div className="min-w-0">
             {board.board && (
               <h2 className="text-lg font-semibold text-foreground truncate" data-testid="board-name">
-                {board.board.name}
-                {!isOwner && (
+                {board.board.displayName ?? board.board.name}
+                {isCombined ? (
+                  <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">every board you can open</span>
+                ) : !isOwner && (
                   <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">shared with you</span>
                 )}
                 {liveStatus === "live" && (
@@ -872,16 +878,19 @@ export function KanbanBoard({
                   <option value="mine">Assigned to me</option>
                   <option value="unassigned">Unassigned</option>
                 </select>
-                <Button variant="outline" onClick={() => setIsMembersDialogOpen(true)}>
-                  <Users className="h-4 w-4 mr-2" />
-                  {isOwner ? "Share" : "Members"}
-                </Button>
+                {!isCombined && (
+                  <Button variant="outline" onClick={() => setIsMembersDialogOpen(true)}>
+                    <Users className="h-4 w-4 mr-2" />
+                    {isOwner ? "Share" : "Members"}
+                  </Button>
+                )}
               </div>
             )}
             <Button variant="outline" onClick={() => setIsAiQuickAddOpen(true)} data-testid="ai-quick-add-button">
               <Sparkles className="h-4 w-4 mr-2" aria-hidden="true" />
               Quick add
             </Button>
+            {!isCombined && (<>
             <Button
               variant="outline"
               onClick={() => setIsArchivedDialogOpen(true)}
@@ -914,6 +923,7 @@ export function KanbanBoard({
               </svg>
               Add Column
             </Button>
+            </>)}
           </div>
         </div>
 
@@ -938,7 +948,8 @@ export function KanbanBoard({
                         : !card.assigneeId
                   )}
                 lockedByOther={lockedByOther}
-                onAddCard={handleAddCard}
+                onAddCard={isCombined ? undefined : handleAddCard}
+                currentUserId={currentUser?.id}
                 onEditCard={handleEditCard}
                 onDeleteCard={handleDeleteCard}
                 onGeneratePrompt={handleGeneratePrompt}
@@ -966,7 +977,7 @@ export function KanbanBoard({
       <AiQuickAddDialog
         open={isAiQuickAddOpen}
         onOpenChange={setIsAiQuickAddOpen}
-        boardId={resolvedBoardId}
+        boardId={isCombined ? undefined : resolvedBoardId}
         onCreated={async () => {
           await fetchBoard();
         }}

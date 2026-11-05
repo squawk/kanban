@@ -25,6 +25,7 @@ import * as card from "~/routes/api.cards.$cardId";
 import * as move from "~/routes/api.cards.$cardId.move";
 import * as columnsRoute from "~/routes/api.columns";
 import * as adminAudit from "~/routes/api.admin.audit";
+import * as boardsRoute from "~/routes/api.boards";
 
 let ipCounter = 0;
 function req(url: string, init: { method?: string; body?: unknown; cookie?: string } = {}) {
@@ -48,7 +49,7 @@ async function activeUser(email: string, name: string) {
 }
 
 type BoardData = {
-  board: { id: string };
+  board: { id: string; displayName?: string; combined?: boolean };
   columns: { id: string; title: string; cardIds: string[] }[];
   cards: Record<string, { id: string; title: string; linkedFrom?: { boardId: string; boardName: string; columnTitle: string | null } }>;
 };
@@ -188,5 +189,41 @@ describe("cards assigned to you on another board", () => {
     const asEve = await getBoard(eve.cookie, bobBoard.board.id);
     expect(asEve.cards[assigned]).toBeUndefined();
     expect(asEve.columns.flatMap((c) => c.cardIds)).not.toContain(assigned);
+  });
+
+  it("names shared boards after their owner", async () => {
+    const list = await (await boardsRoute.loader({ request: req("/api/boards", { cookie: bob.cookie }) } as never)).json();
+    expect(list.find((b: { role: string }) => b.role === "member").displayName).toBe("Brad's board");
+    expect(list.find((b: { role: string }) => b.role === "owner").displayName).toBe("My Board");
+    const shared = await getBoard(bob.cookie, adminBoard.board.id);
+    expect((shared.board as { displayName?: string }).displayName).toBe("Brad's board");
+  });
+
+  it("combines every board you can open into one view, each card once", async () => {
+    const bobBoard = await getBoard(bob.cookie);
+    const bobsOwn = await (await cards.action({
+      request: req("/api/cards", { method: "POST", cookie: bob.cookie, body: { title: "Bob's own", columnId: bobBoard.columns[0].id } }),
+    } as never)).json();
+    const bradsForBob = await createCard("Brad's card for Bob", adminBoard.columns[0].id, bob.id);
+
+    const all = await getBoard(bob.cookie, "all");
+    expect(all.board).toMatchObject({ id: "all", displayName: "Everyone", combined: true });
+    // Columns merged by name, Bob's own board first, then extra columns from other boards
+    expect(all.columns.map((c) => c.title)).toEqual(["To Do", "In Progress", "Completed", "Review"]);
+    const ids = all.columns.flatMap((c) => c.cardIds);
+    expect(ids.filter((id) => id === bradsForBob)).toHaveLength(1); // not duplicated as a linked card
+    expect(ids).toContain(bobsOwn.id);
+    expect(all.cards[bobsOwn.id].linkedFrom?.boardName).toBe("Your board");
+    expect(all.cards[bradsForBob].linkedFrom?.boardName).toBe("Brad's board");
+
+    // Moving from the combined view moves the card on its own board
+    expect((await moveCard(bradsForBob, "Completed")).status).toBe(200);
+    expect(columnOf(await getBoard(admin.cookie), bradsForBob)).toBe("Completed");
+    expect(columnOf(await getBoard(bob.cookie, "all"), bradsForBob)).toBe("Completed");
+
+    // Only boards you can open: Eve sees Bob's board (shared earlier) but not Brad's
+    const eveAll = await getBoard(eve.cookie, "all");
+    expect(eveAll.cards[bobsOwn.id]).toBeDefined();
+    expect(eveAll.cards[bradsForBob]).toBeUndefined();
   });
 });
