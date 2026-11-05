@@ -88,16 +88,16 @@ describe("KanbanBoard Integration Tests", () => {
 
     // Wait for data to load
     await waitFor(() => {
-      expect(screen.getByText("TODO")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "TODO" })).toBeInTheDocument();
     });
 
-    expect(screen.getByText("In Progress")).toBeInTheDocument();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "In Progress" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Completed" })).toBeInTheDocument();
   });
 
   it("should display the app title", async () => {
     // The app title ("Kanban Board") now lives in the page header (routes/home.tsx);
-    // the board itself shows the board's name and the tagline.
+    // the board itself shows the board's name and its pulse.
     mockApi({
       "GET /api/board": () =>
         json({ ...mockBoard, board: { id: "board-1", name: "Launch Plan", role: "owner" } }),
@@ -109,7 +109,52 @@ describe("KanbanBoard Integration Tests", () => {
       expect(screen.getByTestId("board-name")).toHaveTextContent("Launch Plan");
     });
 
-    expect(screen.getByText("Organize your projects with style")).toBeInTheDocument();
+    expect(screen.getByTestId("board-pulse")).toBeInTheDocument();
+  });
+
+  it("spotlights overdue cards and fades the rest", async () => {
+    const card = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      title: id,
+      notes: "",
+      priority: "medium",
+      createdAt: "2024-01-01",
+      updatedAt: "2024-01-01",
+      ...extra,
+    });
+    mockApi({
+      "GET /api/board": () =>
+        json({
+          columns: [
+            { id: "todo", title: "To Do", cardIds: ["Late card", "Fresh card"] },
+            { id: "done", title: "Completed", cardIds: ["Old done card"] },
+          ],
+          cards: {
+            "Late card": card("Late card", { dueDate: "2020-01-01" }),
+            "Fresh card": card("Fresh card"),
+            // Past due but finished: never counts as overdue
+            "Old done card": card("Old done card", { dueDate: "2020-01-01" }),
+          },
+        }),
+    });
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+
+    const lens = await screen.findByTestId("spotlight-overdue");
+    expect(lens).toHaveTextContent("1");
+    expect(screen.getByTestId("pulse-done")).toHaveTextContent("1 of 3");
+
+    await user.click(lens);
+    expect(lens).toHaveAttribute("aria-pressed", "true");
+    const stateOf = (title: string) =>
+      screen.getByText(title).closest("[data-spotlight]")?.getAttribute("data-spotlight");
+    expect(stateOf("Late card")).toBe("match");
+    expect(stateOf("Fresh card")).toBe("dim");
+    expect(stateOf("Old done card")).toBe("dim");
+
+    await user.keyboard("{Escape}");
+    expect(lens).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Late card").closest("[data-spotlight]")).toBeNull();
   });
 
   it("should have Add Column button", async () => {
@@ -125,7 +170,7 @@ describe("KanbanBoard Integration Tests", () => {
     render(<KanbanBoard />);
 
     await waitFor(() => {
-      expect(screen.getByText("TODO")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "TODO" })).toBeInTheDocument();
     });
 
     const addCardButtons = screen.getAllByText("Add Card");
@@ -152,7 +197,7 @@ describe("KanbanBoard Integration Tests", () => {
     render(<KanbanBoard />);
 
     await waitFor(() => {
-      expect(screen.getByText("TODO")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "TODO" })).toBeInTheDocument();
     });
 
     // Click Add Card in TODO column
@@ -246,7 +291,7 @@ describe("KanbanBoard Integration Tests", () => {
 
     // Column should appear
     await waitFor(() => {
-      expect(screen.getByText("Testing")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Testing" })).toBeInTheDocument();
     });
 
     // Verify API was called
@@ -270,7 +315,7 @@ describe("KanbanBoard Integration Tests", () => {
     expect(global.fetch).toHaveBeenCalledWith("/api/archived-cards", undefined);
 
     await waitFor(() => {
-      expect(screen.getByText("TODO")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "TODO" })).toBeInTheDocument();
     });
   });
 

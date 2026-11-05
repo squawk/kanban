@@ -193,7 +193,7 @@ describe("KanbanCard with Tags, Priority, and Due Date", () => {
   });
 
   it("should render complete card with all features", () => {
-    const { date: tomorrow, iso: tomorrowIso } = dueDateInDays(1);
+    const { iso: tomorrowIso } = dueDateInDays(1);
 
     const fullCard: KanbanCardType = {
       id: "card-full",
@@ -223,9 +223,8 @@ describe("KanbanCard with Tags, Priority, and Due Date", () => {
     expect(screen.getByText("Feature")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument(); // comment count
 
-    // Check due date is displayed (should be tomorrow's date)
-    const dueDateText = tomorrow.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    expect(screen.getByText(dueDateText)).toBeInTheDocument();
+    // A due date of tomorrow reads "Tomorrow"
+    expect(screen.getByText("Tomorrow")).toBeInTheDocument();
   });
 });
 

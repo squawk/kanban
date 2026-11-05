@@ -28,6 +28,8 @@ import type {
   UserSummary,
   CurrentUser,
 } from "~/lib/types";
+import { computeBoardPulse, type SpotlightKind } from "~/lib/board-pulse";
+import { BoardPulse } from "./BoardPulse";
 import { apiFetch } from "~/lib/api";
 import { COMBINED_BOARD_ID } from "~/lib/linked-cards";
 import { useCardLock } from "~/lib/use-card-lock";
@@ -67,6 +69,7 @@ export function KanbanBoard({
 }: KanbanBoardProps = {}) {
   const [board, setBoard] = useState<KanbanBoardType>({ columns: [], cards: {} });
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("all");
+  const [spotlight, setSpotlight] = useState<SpotlightKind | null>(null);
   const [isMembersDialogOpen, setIsMembersDialogOpen] = useState(false);
   const [isAiQuickAddOpen, setIsAiQuickAddOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -778,6 +781,21 @@ export function KanbanBoard({
   // Default column titles that cannot be deleted
   const defaultColumnTitles = ["to do", "in progress", "completed"];
 
+  // Columns with the assignee filter applied; the pulse and the lanes both use these
+  const visibleColumns = board.columns.map((column) => ({
+    ...column,
+    cardIds: column.cardIds.filter((id) => {
+      const card = board.cards[id];
+      if (!card) return false;
+      return assigneeFilter === "all"
+        ? true
+        : assigneeFilter === "mine"
+          ? card.assigneeId === currentUser?.id
+          : !card.assigneeId;
+    }),
+  }));
+  const pulse = computeBoardPulse({ columns: visibleColumns, cards: board.cards }, { currentUserId: currentUser?.id });
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center py-20">
@@ -814,9 +832,6 @@ export function KanbanBoard({
                 )}
               </h2>
             )}
-            <p className="hidden sm:block text-muted-foreground">
-              Organize your projects with style
-            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {members.length > 0 && (
@@ -927,26 +942,26 @@ export function KanbanBoard({
           </div>
         </div>
 
+        <BoardPulse
+          pulse={pulse}
+          spotlight={spotlight}
+          onSpotlightChange={setSpotlight}
+          showMine={!!currentUser}
+        />
+
         <DndContext
           sensors={sensors}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
           <div className="flex gap-4 sm:gap-6 overflow-x-auto pb-4 -mx-4 px-4 sm:mx-0 sm:px-0">
-            {board.columns.map((column) => (
+            {visibleColumns.map((column, i) => (
               <KanbanColumn
                 key={column.id}
                 column={column}
-                cards={column.cardIds
-                  .map((id) => board.cards[id])
-                  .filter(Boolean)
-                  .filter((card) =>
-                    assigneeFilter === "all"
-                      ? true
-                      : assigneeFilter === "mine"
-                        ? card.assigneeId === currentUser?.id
-                        : !card.assigneeId
-                  )}
+                hue={pulse.lanes[i]?.hue}
+                spotlight={spotlight}
+                cards={column.cardIds.map((id) => board.cards[id]).filter(Boolean)}
                 lockedByOther={lockedByOther}
                 onAddCard={isCombined ? undefined : handleAddCard}
                 currentUserId={currentUser?.id}
