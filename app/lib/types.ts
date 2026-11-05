@@ -76,6 +76,8 @@ export interface KanbanCard {
   version?: number;
   /** Active edit lock (someone has the card open in the edit dialog) */
   lock?: { userId: string; name: string; expiresAt: string } | null;
+  /** Set when the card lives on another board and is shown here because it's assigned to you */
+  linkedFrom?: { boardId: string; boardName: string; columnTitle: string | null };
   createdAt: string;
   updatedAt: string;
 }

@@ -1,10 +1,11 @@
 import { db } from "~/lib/db";
 import { columns, cards } from "~/lib/db/schema";
-import { eq, asc, and, isNull, inArray } from "drizzle-orm";
+import { eq, asc, and, isNull, inArray, ne } from "drizzle-orm";
 import {
   api,
   boardIdFromRequest,
   getBoardParticipants,
+  listAccessibleBoards,
   requireUser,
   resolveBoard,
 } from "~/lib/access.server";
@@ -15,6 +16,7 @@ import { logAudit } from "~/lib/audit.server";
 import { notifyCardMoved } from "~/lib/notifications.server";
 import { broadcastBoardChanged, clientRealtimeConfig } from "~/lib/realtime.server";
 import { getActiveLocks } from "~/lib/card-locks.server";
+import { columnKey } from "~/lib/linked-cards";
 
 // GET /api/board?boardId= - Get a kanban board (defaults to the user's own board)
 export const loader = api("fetch board", async ({ request }: { request: Request }) => {
@@ -32,19 +34,43 @@ export const loader = api("fetch board", async ({ request }: { request: Request 
     .from(cards)
     .where(and(eq(cards.boardId, board.id), isNull(cards.archivedAt)));
 
-  const serialized = await serializeCards(boardCards);
+  const outColumns = boardColumns.map((col) => ({
+    id: col.id,
+    title: col.title,
+    cardIds: JSON.parse(col.cardIds) as string[],
+  }));
+
+  // On your own board, also show cards assigned to you on boards shared with you.
+  // They stay on their own board: each appears in the column with the same name here
+  // (the first column if there's none), and moving it here moves it there.
+  const linked = role === "owner" && outColumns.length > 0 ? await linkedCardsFor(user.id, board.id) : [];
+  for (const { card, columnTitle } of linked) {
+    const target = outColumns.find((c) => columnKey(c.title) === columnKey(columnTitle ?? "")) ?? outColumns[0];
+    target.cardIds.push(card.id);
+  }
+
+  const serialized = await serializeCards([...boardCards, ...linked.map((l) => l.card)]);
+  const linkedById = new Map(linked.map((l) => [l.card.id, l]));
   const locks = await getActiveLocks(serialized.map((c) => c.id));
 
   return json({
     board: { id: board.id, name: board.name, role },
     realtime: clientRealtimeConfig(board.id),
     members: await getBoardParticipants(board.id),
-    columns: boardColumns.map((col) => ({
-      id: col.id,
-      title: col.title,
-      cardIds: JSON.parse(col.cardIds),
-    })),
-    cards: Object.fromEntries(serialized.map((c) => [c.id, { ...c, lock: locks.get(c.id) ?? null }])),
+    columns: outColumns,
+    cards: Object.fromEntries(
+      serialized.map((c) => {
+        const l = linkedById.get(c.id);
+        return [
+          c.id,
+          {
+            ...c,
+            lock: locks.get(c.id) ?? null,
+            ...(l && { linkedFrom: { boardId: l.card.boardId, boardName: l.boardName, columnTitle: l.columnTitle } }),
+          },
+        ];
+      })
+    ),
   });
 });
 
@@ -137,3 +163,25 @@ export const action = api("update board", async ({ request }: { request: Request
 
   return json({ success: true });
 });
+
+/** Active cards assigned to the user on other boards they can access, with each card's column there. */
+async function linkedCardsFor(userId: string, ownBoardId: string) {
+  const others = (await listAccessibleBoards(userId)).filter((b) => b.id !== ownBoardId);
+  if (others.length === 0) return [];
+  const assigned = await db
+    .select()
+    .from(cards)
+    .where(and(eq(cards.assigneeId, userId), isNull(cards.archivedAt), inArray(cards.boardId, others.map((b) => b.id)), ne(cards.boardId, ownBoardId)));
+  if (assigned.length === 0) return [];
+
+  // Boards are usually all called "My Board", so name them after their owner
+  const label = new Map(
+    others.map((b) => [b.id, b.ownerName && b.name === "My Board" ? `${b.ownerName}'s board` : b.ownerName ? `${b.name} (${b.ownerName})` : b.name])
+  );
+  const sourceBoardIds = [...new Set(assigned.map((c) => c.boardId))];
+  const columnOf = new Map<string, string>();
+  for (const col of await db.select().from(columns).where(inArray(columns.boardId, sourceBoardIds))) {
+    for (const id of JSON.parse(col.cardIds) as string[]) columnOf.set(id, col.title);
+  }
+  return assigned.map((card) => ({ card, boardName: label.get(card.boardId) ?? "Shared board", columnTitle: columnOf.get(card.id) ?? null }));
+}
