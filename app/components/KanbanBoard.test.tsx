@@ -2,27 +2,82 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { KanbanBoard } from "./KanbanBoard";
+import type { KanbanBoard as KanbanBoardType } from "~/lib/types";
 
 // Mock fetch for API calls
 global.fetch = vi.fn();
 
-const mockBoard = {
+const mockBoard: KanbanBoardType = {
   columns: [
-    { id: "todo", title: "TODO", cardIds: [], position: 0 },
-    { id: "in-progress", title: "In Progress", cardIds: [], position: 1 },
-    { id: "completed", title: "Completed", cardIds: [], position: 2 },
+    { id: "todo", title: "TODO", cardIds: [] },
+    { id: "in-progress", title: "In Progress", cardIds: [] },
+    { id: "completed", title: "Completed", cardIds: [] },
   ],
   cards: {},
 };
 
+type MockResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
+type Handler = (init?: RequestInit) => MockResponse | Promise<MockResponse>;
+
+const json = (body: unknown, status = 200): MockResponse => ({
+  ok: status >= 200 && status < 300,
+  status,
+  json: async () => body,
+});
+
+/**
+ * Route fetch calls by "METHOD /path" instead of call order: on mount the board
+ * loads /api/board and /api/archived-cards, and CardDialog loads /api/tags, so
+ * `mockResolvedValueOnce` chains end up answering the wrong request.
+ * Unrouted requests get a 404 so a missing mock fails loudly instead of silently.
+ */
+function mockApi(routes: Record<string, Handler> = {}) {
+  const defaults: Record<string, Handler> = {
+    "GET /api/board": () => json(mockBoard),
+    "GET /api/archived-cards": () => json([]),
+    "GET /api/tags": () => json([]),
+  };
+  const table = { ...defaults, ...routes };
+  vi.mocked(global.fetch).mockImplementation(async (input, init) => {
+    const url = typeof input === "string" ? input : input.toString();
+    const path = url.split("?")[0];
+    const key = `${(init?.method ?? "GET").toUpperCase()} ${path}`;
+    const handler = table[key];
+    return (handler ? await handler(init) : json({ error: `Unmocked ${key}` }, 404)) as unknown as Response;
+  });
+}
+
+/** Parsed JSON body of the first fetch call matching method + path */
+function requestBody(method: string, path: string) {
+  const call = vi
+    .mocked(global.fetch)
+    .mock.calls.find(([url, init]) => url === path && (init?.method ?? "GET") === method);
+  expect(call, `${method} ${path} was not called`).toBeDefined();
+  return JSON.parse(String(call![1]!.body));
+}
+
+const boardWithCard = (title: string, notes: string): KanbanBoardType => ({
+  columns: [
+    { id: "todo", title: "TODO", cardIds: ["card-1"] },
+    { id: "in-progress", title: "In Progress", cardIds: [] },
+    { id: "completed", title: "Completed", cardIds: [] },
+  ],
+  cards: {
+    "card-1": {
+      id: "card-1",
+      title,
+      notes,
+      priority: "medium",
+      createdAt: "2024-01-01",
+      updatedAt: "2024-01-01",
+    },
+  },
+});
+
 describe("KanbanBoard Integration Tests", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock the initial board fetch
-    (global.fetch as any).mockResolvedValue({
-      ok: true,
-      json: async () => mockBoard,
-    });
+    mockApi();
   });
 
   it("should render with default columns after loading", async () => {
@@ -41,10 +96,17 @@ describe("KanbanBoard Integration Tests", () => {
   });
 
   it("should display the app title", async () => {
+    // The app title ("Kanban Board") now lives in the page header (routes/home.tsx);
+    // the board itself shows the board's name and the tagline.
+    mockApi({
+      "GET /api/board": () =>
+        json({ ...mockBoard, board: { id: "board-1", name: "Launch Plan", role: "owner" } }),
+    });
+
     render(<KanbanBoard />);
 
     await waitFor(() => {
-      expect(screen.getByText("Vibe Coding Kanban")).toBeInTheDocument();
+      expect(screen.getByTestId("board-name")).toHaveTextContent("Launch Plan");
     });
 
     expect(screen.getByText("Organize your projects with style")).toBeInTheDocument();
@@ -72,48 +134,20 @@ describe("KanbanBoard Integration Tests", () => {
     await waitFor(() => {
       expect(screen.getByText("Create New Card")).toBeInTheDocument();
     });
+    expect(global.fetch).toHaveBeenCalledWith("/api/tags");
   });
 
   it("should create a new card via API", async () => {
     const user = userEvent.setup();
+    let board: KanbanBoardType = mockBoard;
 
-    // Mock successful card creation
-    (global.fetch as any)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockBoard,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: "card-1",
-          title: "Test Task",
-          notes: "This is a test task",
-          boardId: "board-1",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          columns: [
-            { id: "todo", title: "TODO", cardIds: ["card-1"], position: 0 },
-            { id: "in-progress", title: "In Progress", cardIds: [], position: 1 },
-            { id: "completed", title: "Completed", cardIds: [], position: 2 },
-          ],
-          cards: {
-            "card-1": {
-              id: "card-1",
-              title: "Test Task",
-              notes: "This is a test task",
-              boardId: "board-1",
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            },
-          },
-        }),
-      });
+    mockApi({
+      "GET /api/board": () => json(board),
+      "POST /api/cards": () => {
+        board = boardWithCard("Test Task", "This is a test task");
+        return json(board.cards["card-1"], 201);
+      },
+    });
 
     render(<KanbanBoard />);
 
@@ -145,18 +179,16 @@ describe("KanbanBoard Integration Tests", () => {
       expect(screen.getByText("Test Task")).toBeInTheDocument();
       expect(screen.getByText("This is a test task")).toBeInTheDocument();
     });
+    expect(screen.queryByText("Create New Card")).not.toBeInTheDocument();
 
     // Verify API was called
-    expect(global.fetch).toHaveBeenCalledWith(
-      "/api/cards",
+    expect(requestBody("POST", "/api/cards")).toEqual(
       expect.objectContaining({
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: "Test Task",
-          notes: "This is a test task",
-          columnId: "todo",
-        }),
+        title: "Test Task",
+        notes: "This is a test task",
+        columnId: "todo",
+        priority: "medium",
+        tagIds: [],
       })
     );
   });
@@ -179,33 +211,16 @@ describe("KanbanBoard Integration Tests", () => {
 
   it("should create a new column via API", async () => {
     const user = userEvent.setup();
+    let board: KanbanBoardType = mockBoard;
 
-    // Mock successful column creation
-    (global.fetch as any)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockBoard,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: "testing",
-          title: "Testing",
-          position: 3,
-          boardId: "board-1",
-          cardIds: [],
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          columns: [
-            ...mockBoard.columns,
-            { id: "testing", title: "Testing", cardIds: [], position: 3 },
-          ],
-          cards: {},
-        }),
-      });
+    mockApi({
+      "GET /api/board": () => json(board),
+      "POST /api/columns": () => {
+        const column = { id: "testing", title: "Testing", cardIds: [] };
+        board = { ...board, columns: [...board.columns, column] };
+        return json(column, 201);
+      },
+    });
 
     render(<KanbanBoard />);
 
@@ -248,9 +263,11 @@ describe("KanbanBoard Integration Tests", () => {
   it("should fetch board from database on mount", async () => {
     render(<KanbanBoard />);
 
+    // apiFetch forwards an (undefined) options argument, so match on the URL only
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith("/api/board");
+      expect(global.fetch).toHaveBeenCalledWith("/api/board", undefined);
     });
+    expect(global.fetch).toHaveBeenCalledWith("/api/archived-cards", undefined);
 
     await waitFor(() => {
       expect(screen.getByText("TODO")).toBeInTheDocument();
@@ -260,9 +277,7 @@ describe("KanbanBoard Integration Tests", () => {
   it("should handle board fetch error gracefully", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    (global.fetch as any).mockResolvedValueOnce({
-      ok: false,
-    });
+    mockApi({ "GET /api/board": () => json({ error: "boom" }, 500) });
 
     render(<KanbanBoard />);
 
@@ -276,44 +291,11 @@ describe("KanbanBoard Integration Tests", () => {
   it("should handle AI prompt generation", async () => {
     const user = userEvent.setup();
 
-    // Mock board with a card
-    const boardWithCard = {
-      columns: [
-        { id: "todo", title: "TODO", cardIds: ["card-1"], position: 0 },
-        { id: "in-progress", title: "In Progress", cardIds: [], position: 1 },
-        { id: "completed", title: "Completed", cardIds: [], position: 2 },
-      ],
-      cards: {
-        "card-1": {
-          id: "card-1",
-          title: "Feature Request",
-          notes: "Add dark mode",
-          boardId: "board-1",
-          createdAt: "2024-01-01",
-          updatedAt: "2024-01-01",
-        },
-      },
-    };
-
-    // Mock initial fetch
-    (global.fetch as any)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => boardWithCard,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          prompt: "Generated prompt for testing",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ...boardWithCard.cards["card-1"],
-          generatedPrompt: "Generated prompt for testing",
-        }),
-      });
+    mockApi({
+      "GET /api/board": () => json(boardWithCard("Feature Request", "Add dark mode")),
+      "POST /api/generate-prompt": () => json({ prompt: "Generated prompt for testing" }),
+      "PUT /api/cards/card-1": () => json({ id: "card-1" }),
+    });
 
     render(<KanbanBoard />);
 
@@ -343,42 +325,23 @@ describe("KanbanBoard Integration Tests", () => {
         }),
       })
     );
+
+    // Only the prompt is saved back, so a concurrent edit to title/notes isn't overwritten
+    await waitFor(() => {
+      expect(requestBody("PUT", "/api/cards/card-1")).toEqual({
+        generatedPrompt: "Generated prompt for testing",
+      });
+    });
   });
 
   it("should handle AI prompt generation error", async () => {
     const user = userEvent.setup();
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    // Mock board with a card
-    const boardWithCard = {
-      columns: [
-        { id: "todo", title: "TODO", cardIds: ["card-1"], position: 0 },
-        { id: "in-progress", title: "In Progress", cardIds: [], position: 1 },
-        { id: "completed", title: "Completed", cardIds: [], position: 2 },
-      ],
-      cards: {
-        "card-1": {
-          id: "card-1",
-          title: "Test Card",
-          notes: "Test",
-          boardId: "board-1",
-          createdAt: "2024-01-01",
-          updatedAt: "2024-01-01",
-        },
-      },
-    };
-
-    // Mock API error
-    (global.fetch as any)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => boardWithCard,
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        json: async () => ({
-          error: "API key not configured",
-        }),
-      });
+    mockApi({
+      "GET /api/board": () => json(boardWithCard("Test Card", "Test")),
+      "POST /api/generate-prompt": () => json({ error: "API key not configured" }, 500),
+    });
 
     render(<KanbanBoard />);
 
@@ -392,5 +355,9 @@ describe("KanbanBoard Integration Tests", () => {
     await waitFor(() => {
       expect(screen.getByText("API key not configured")).toBeInTheDocument();
     });
+
+    // Nothing is saved when generation fails
+    expect(global.fetch).not.toHaveBeenCalledWith("/api/cards/card-1", expect.anything());
+    consoleErrorSpy.mockRestore();
   });
 });

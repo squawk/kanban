@@ -9,6 +9,21 @@ const DndWrapper = ({ children }: { children: React.ReactNode }) => (
   <DndContext>{children}</DndContext>
 );
 
+/**
+ * Due dates are stored as calendar dates at UTC midnight ("2024-12-25T00:00:00.000Z")
+ * and KanbanCard reads the date part as a local calendar date. Build test dates the
+ * same way, so they don't shift a day depending on the runner's timezone.
+ */
+function dueDateInDays(offset: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    date: d,
+    iso: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00:00.000Z`,
+  };
+}
+
 describe("KanbanCard with Tags, Priority, and Due Date", () => {
   const mockCard: KanbanCardType = {
     id: "card-1",
@@ -45,7 +60,8 @@ describe("KanbanCard with Tags, Priority, and Due Date", () => {
       </DndWrapper>
     );
 
-    const cardElement = container.querySelector('[class*="border-l-red"]');
+    // Priority colors use theme tokens (so they work in both themes): high = destructive
+    const cardElement = container.querySelector('[class*="border-l-destructive"]');
     expect(cardElement).toBeInTheDocument();
   });
 
@@ -86,42 +102,54 @@ describe("KanbanCard with Tags, Priority, and Due Date", () => {
     expect(screen.getByText("Dec 25")).toBeInTheDocument();
   });
 
-  it("should highlight overdue dates in red", () => {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-
+  it("should highlight overdue dates in the destructive (red) color", () => {
     const overdueCard: KanbanCardType = {
       ...mockCard,
-      dueDate: yesterday.toISOString(),
+      dueDate: dueDateInDays(-1).iso,
     };
 
-    const { container } = render(
+    render(
       <DndWrapper>
         <KanbanCard card={overdueCard} {...mockHandlers} />
       </DndWrapper>
     );
 
-    const dueDateElement = container.querySelector('[class*="text-red"]');
-    expect(dueDateElement).toBeInTheDocument();
+    const dueDateElement = screen.getByTitle("Overdue!");
+    expect(dueDateElement).toHaveClass("text-destructive");
   });
 
-  it("should highlight today's due dates in orange", () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+  it("should highlight today's due dates in the primary (accent) color", () => {
     const todayCard: KanbanCardType = {
       ...mockCard,
-      dueDate: today.toISOString(),
+      dueDate: dueDateInDays(0).iso,
     };
 
-    const { container } = render(
+    render(
       <DndWrapper>
         <KanbanCard card={todayCard} {...mockHandlers} />
       </DndWrapper>
     );
 
-    const dueDateElement = container.querySelector('[class*="text-orange"]');
-    expect(dueDateElement).toBeInTheDocument();
+    const dueDateElement = screen.getByTitle("Due today");
+    expect(dueDateElement).toHaveClass("text-primary");
+    expect(dueDateElement).not.toHaveClass("text-destructive");
+  });
+
+  it("should not highlight future due dates", () => {
+    const futureCard: KanbanCardType = {
+      ...mockCard,
+      dueDate: dueDateInDays(3).iso,
+    };
+
+    render(
+      <DndWrapper>
+        <KanbanCard card={futureCard} {...mockHandlers} />
+      </DndWrapper>
+    );
+
+    const dueDateElement = screen.getByTitle("Due date");
+    expect(dueDateElement).not.toHaveClass("text-destructive");
+    expect(dueDateElement).not.toHaveClass("text-primary");
   });
 
   it("should display comment count when present", () => {
@@ -144,11 +172,11 @@ describe("KanbanCard with Tags, Priority, and Due Date", () => {
 
   it("should show all priority indicators correctly", () => {
     const priorities: Array<"low" | "medium" | "high"> = ["low", "medium", "high"];
-    const borderClasses = ["border-l-blue", "border-l-yellow", "border-l-red"];
+    const borderClasses = ["border-l-muted", "border-l-primary", "border-l-destructive"];
 
     priorities.forEach((priority, index) => {
       const card = { ...mockCard, priority };
-      const { container } = render(
+      const { container, unmount } = render(
         <DndWrapper>
           <KanbanCard card={card} {...mockHandlers} />
         </DndWrapper>
@@ -156,19 +184,23 @@ describe("KanbanCard with Tags, Priority, and Due Date", () => {
 
       const cardElement = container.querySelector(`[class*="${borderClasses[index]}"]`);
       expect(cardElement).toBeInTheDocument();
+      // Exactly one priority color per card
+      borderClasses
+        .filter((_, i) => i !== index)
+        .forEach((other) => expect(container.querySelector(`[class*="${other}"]`)).toBeNull());
+      unmount();
     });
   });
 
   it("should render complete card with all features", () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const { date: tomorrow, iso: tomorrowIso } = dueDateInDays(1);
 
     const fullCard: KanbanCardType = {
       id: "card-full",
       title: "Complete Task",
       notes: "Full task with everything",
       priority: "high",
-      dueDate: tomorrow.toISOString(),
+      dueDate: tomorrowIso,
       tags: [
         { id: "tag-1", name: "Feature", color: "#3b82f6", createdAt: "2024-01-01", updatedAt: "2024-01-01" },
       ],

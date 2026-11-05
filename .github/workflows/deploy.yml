@@ -29,7 +29,7 @@ jobs:
       - name: Typecheck and test
         run: |
           npm run typecheck
-          npx vitest run app/lib
+          npx vitest run
       - name: Apply database migrations
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
