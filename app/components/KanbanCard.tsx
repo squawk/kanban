@@ -14,9 +14,13 @@ interface KanbanCardProps {
   lockedBy?: UserSummary;
   /** When set, a card assigned to someone else is dimmed */
   currentUserId?: string;
+  /** Spotlight state: "match" glows, "dim" fades into the background */
+  spotlight?: "match" | "dim";
+  /** Glow color (HSL hue) for a spotlighted card */
+  glowHue?: number;
 }
 
-export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy, currentUserId }: KanbanCardProps) {
+export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy, currentUserId, spotlight, glowHue = 38 }: KanbanCardProps) {
   const {
     attributes,
     listeners,
@@ -49,29 +53,51 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy,
     now.setHours(0, 0, 0, 0); // Compare dates only, not times
     const isOverdue = date < now;
     const isToday = date.toDateString() === now.toDateString();
+    const days = Math.round((date.getTime() - now.getTime()) / 86_400_000);
 
     return {
-      text: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      text: isToday ? "Today" : days === 1 ? "Tomorrow" : date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
       isOverdue,
       isToday,
+      isSoon: days > 0 && days <= 7,
     };
   };
 
   const dueInfo = card.dueDate ? formatDueDate(card.dueDate) : null;
   // Someone else's card: dim it so your own work stands out
   const assignedToOther = !!(currentUserId && card.assigneeId && card.assigneeId !== currentUserId);
+  const hasComments = !!card.comments && card.comments.length > 0;
+  const hasFooter = !!dueInfo || hasComments || !!card.assignee;
+  const fade =
+    spotlight === "dim"
+      ? "opacity-25 grayscale scale-[0.97] hover:opacity-100 hover:grayscale-0 hover:scale-100 focus-within:opacity-100"
+      : spotlight === "match"
+        ? ""
+        : assignedToOther
+          ? "opacity-60 hover:opacity-100 focus-within:opacity-100"
+          : "";
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`group transition-opacity ${isDragging ? "opacity-50" : assignedToOther ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
+      className={`group transition-all duration-300 ${isDragging ? "opacity-50" : fade}`}
       data-assigned-to-other={assignedToOther || undefined}
+      data-spotlight={spotlight}
       {...attributes}
       {...listeners}
     >
-      <Card className={`mb-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:scale-[1.02] bg-card border-2 border-border border-l-8 ${getPriorityColor(card.priority)}`}>
-        <CardHeader className="pb-3">
+      <Card
+        className={`mb-2.5 rounded-xl cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 bg-card border-2 border-border border-l-[6px] ${getPriorityColor(card.priority)}`}
+        style={
+          spotlight === "match"
+            ? {
+                boxShadow: `0 0 0 2px hsl(${glowHue} 75% 52%), 0 8px 24px -6px hsl(${glowHue} 75% 50% / 0.55)`,
+              }
+            : undefined
+        }
+      >
+        <CardHeader className={`p-3.5 ${hasFooter || card.notes ? "pb-2" : ""}`}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <CardTitle className="text-sm font-semibold text-foreground line-clamp-2">
@@ -199,7 +225,8 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy,
             </div>
           )}
         </CardHeader>
-        <CardContent className="pt-0 space-y-2">
+        {(card.notes || hasFooter) && (
+        <CardContent className="p-3.5 pt-0 space-y-2">
           {card.notes && (
             <p className="text-xs text-muted-foreground line-clamp-3">
               {card.notes}
@@ -207,17 +234,20 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy,
           )}
 
           {/* Footer with due date and comments */}
+          {hasFooter && (
           <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
             <div className="flex items-center gap-2">
               {/* Due date */}
               {dueInfo && (
                 <div
-                  className={`flex items-center gap-1 ${
+                  className={`flex items-center gap-1 rounded-full px-2 py-0.5 ${
                     dueInfo.isOverdue
-                      ? 'text-destructive font-semibold'
+                      ? 'bg-destructive/15 text-destructive font-semibold'
                       : dueInfo.isToday
-                      ? 'text-primary font-semibold'
-                      : ''
+                      ? 'bg-primary/15 text-primary font-semibold'
+                      : dueInfo.isSoon
+                      ? 'bg-amber-500/15 text-amber-600 font-medium'
+                      : 'bg-muted'
                   }`}
                   title={dueInfo.isOverdue ? 'Overdue!' : dueInfo.isToday ? 'Due today' : 'Due date'}
                 >
@@ -229,7 +259,7 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy,
 
             <div className="flex items-center gap-2">
               {/* Comments count */}
-              {card.comments && card.comments.length > 0 && (
+              {hasComments && card.comments && (
                 <div className="flex items-center gap-1">
                   <MessageSquare className="h-3 w-3" />
                   <span>{card.comments.length}</span>
@@ -244,7 +274,9 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy,
               )}
             </div>
           </div>
+          )}
         </CardContent>
+        )}
       </Card>
     </div>
   );
