@@ -19,6 +19,10 @@ export interface BoardInfo {
   id: string;
   name: string;
   role: 'owner' | 'member';
+  /** Name to show: "Luke's board" for a shared board that kept the default name */
+  displayName?: string;
+  /** The combined view of every board you can open */
+  combined?: boolean;
 }
 
 export interface BoardListItem {
@@ -26,6 +30,7 @@ export interface BoardListItem {
   name: string;
   role: 'owner' | 'member';
   ownerName: string | null;
+  displayName?: string;
 }
 
 export interface ActivityEntry {

@@ -12,9 +12,11 @@ interface KanbanCardProps {
   onGeneratePrompt: (card: KanbanCardType) => void;
   /** Someone else has this card locked for editing */
   lockedBy?: UserSummary;
+  /** When set, a card assigned to someone else is dimmed */
+  currentUserId?: string;
 }
 
-export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy }: KanbanCardProps) {
+export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy, currentUserId }: KanbanCardProps) {
   const {
     attributes,
     listeners,
@@ -56,12 +58,15 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy 
   };
 
   const dueInfo = card.dueDate ? formatDueDate(card.dueDate) : null;
+  // Someone else's card: dim it so your own work stands out
+  const assignedToOther = !!(currentUserId && card.assigneeId && card.assigneeId !== currentUserId);
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`group ${isDragging ? "opacity-50" : ""}`}
+      className={`group transition-opacity ${isDragging ? "opacity-50" : assignedToOther ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
+      data-assigned-to-other={assignedToOther || undefined}
       {...attributes}
       {...listeners}
     >

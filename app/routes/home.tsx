@@ -1,4 +1,5 @@
 import type { Route } from "./+types/home";
+import { COMBINED_BOARD_ID } from "~/lib/linked-cards";
 import { KanbanBoard } from "~/components/KanbanBoard";
 import { MyTasksDialog } from "~/components/MyTasksDialog";
 import { AccountDialog } from "~/components/AccountDialog";
@@ -105,9 +106,10 @@ export default function Home() {
               >
                 {boards.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.role === "owner" ? b.name : `${b.name} (${b.ownerName ?? "shared"})`}
+                    {b.displayName ?? (b.role === "owner" ? b.name : `${b.name} (${b.ownerName ?? "shared"})`)}
                   </option>
                 ))}
+                <option value={COMBINED_BOARD_ID}>Everyone (all boards)</option>
               </select>
             )}
           </div>
@@ -176,7 +178,7 @@ export default function Home() {
         }}
         onBoardLoaded={(info) => {
           // Keep switcher labels current (e.g. after a rename or being added to a board)
-          if (!boards.some((b) => b.id === info.id)) loadBoards();
+          if (info.id !== COMBINED_BOARD_ID && !boards.some((b) => b.id === info.id)) loadBoards();
         }}
       />
 

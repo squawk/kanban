@@ -16,11 +16,13 @@ import { logAudit } from "~/lib/audit.server";
 import { notifyCardMoved } from "~/lib/notifications.server";
 import { broadcastBoardChanged, clientRealtimeConfig } from "~/lib/realtime.server";
 import { getActiveLocks } from "~/lib/card-locks.server";
-import { columnKey } from "~/lib/linked-cards";
+import { cardBoardLabel, columnKey, COMBINED_BOARD_ID, sharedBoardName } from "~/lib/linked-cards";
+import { users } from "~/lib/db/schema";
 
 // GET /api/board?boardId= - Get a kanban board (defaults to the user's own board)
 export const loader = api("fetch board", async ({ request }: { request: Request }) => {
   const user = await requireUser(request);
+  if (boardIdFromRequest(request) === COMBINED_BOARD_ID) return json(await combinedBoard(user.id));
   const { board, role } = await resolveBoard(user, boardIdFromRequest(request));
 
   const boardColumns = await db
@@ -55,7 +57,7 @@ export const loader = api("fetch board", async ({ request }: { request: Request 
   const locks = await getActiveLocks(serialized.map((c) => c.id));
 
   return json({
-    board: { id: board.id, name: board.name, role },
+    board: { id: board.id, name: board.name, role, displayName: role === "owner" ? board.name : sharedBoardName(board.name, await ownerName(board.userId)) },
     realtime: clientRealtimeConfig(board.id),
     members: await getBoardParticipants(board.id),
     columns: outColumns,
@@ -183,14 +185,9 @@ async function linkedCardsFor(ownerId: string, boardId: string, viewerId: string
     .where(and(eq(cards.assigneeId, ownerId), isNull(cards.archivedAt), inArray(cards.boardId, sourceIds), ne(cards.boardId, boardId)));
   if (assigned.length === 0) return [];
 
-  // Label boards from the viewer's point of view. They're usually all called
-  // "My Board", so name them after their owner.
   const label = (id: string) => {
     const b = visible.get(id);
-    if (!b) return "Shared board";
-    if (b.role === "owner") return b.name === "My Board" ? "Your board" : b.name;
-    if (b.ownerName) return b.name === "My Board" ? `${b.ownerName}'s board` : `${b.name} (${b.ownerName})`;
-    return b.name;
+    return b ? cardBoardLabel(b) : "Shared board";
   };
   const sourceBoardIds = [...new Set(assigned.map((c) => c.boardId))];
   const columnOf = new Map<string, string>();
@@ -198,4 +195,66 @@ async function linkedCardsFor(ownerId: string, boardId: string, viewerId: string
     for (const id of JSON.parse(col.cardIds) as string[]) columnOf.set(id, col.title);
   }
   return assigned.map((card) => ({ card, boardName: label(card.boardId), columnTitle: columnOf.get(card.id) ?? null }));
+}
+
+async function ownerName(userId: string) {
+  return (await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1))[0]?.name ?? null;
+}
+
+/**
+ * Every board the user can open, merged into one view: columns with the same name are
+ * combined (in the order they first appear, your own board first), and each card is
+ * labeled with the board it lives on. Cards are moved with POST /api/cards/:id/move.
+ */
+async function combinedBoard(userId: string) {
+  const accessible = await listAccessibleBoards(userId); // own boards first
+  const boardIds = accessible.map((b) => b.id);
+  const byId = new Map(accessible.map((b) => [b.id, b]));
+
+  const allColumns = boardIds.length
+    ? await db.select().from(columns).where(inArray(columns.boardId, boardIds)).orderBy(asc(columns.position))
+    : [];
+  const merged = new Map<string, { id: string; title: string; cardIds: string[] }>();
+  const columnTitleOf = new Map<string, string>();
+  for (const boardId of boardIds) {
+    for (const col of allColumns.filter((c) => c.boardId === boardId)) {
+      const key = columnKey(col.title);
+      if (!merged.has(key)) merged.set(key, { id: `${COMBINED_BOARD_ID}:${key}`, title: col.title, cardIds: [] });
+      for (const id of JSON.parse(col.cardIds) as string[]) {
+        merged.get(key)!.cardIds.push(id);
+        columnTitleOf.set(id, col.title);
+      }
+    }
+  }
+
+  const boardCards = boardIds.length
+    ? await db.select().from(cards).where(and(inArray(cards.boardId, boardIds), isNull(cards.archivedAt)))
+    : [];
+  const live = new Set(boardCards.map((c) => c.id));
+  for (const col of merged.values()) col.cardIds = col.cardIds.filter((id) => live.has(id));
+
+  const serialized = await serializeCards(boardCards);
+  const locks = await getActiveLocks(serialized.map((c) => c.id));
+
+  // Everyone on any of these boards, once each
+  const members = new Map<string, Awaited<ReturnType<typeof getBoardParticipants>>[number]>();
+  for (const boardId of boardIds) {
+    for (const p of await getBoardParticipants(boardId)) if (!members.has(p.id)) members.set(p.id, { ...p, boardRole: "member" });
+  }
+
+  return {
+    board: { id: COMBINED_BOARD_ID, name: "Everyone", displayName: "Everyone", role: "member" as const, combined: true },
+    realtime: null,
+    members: [...members.values()],
+    columns: [...merged.values()],
+    cards: Object.fromEntries(
+      serialized.map((c) => {
+        const b = byId.get(c.boardId!)!;
+        return [
+          c.id,
+          { ...c, lock: locks.get(c.id) ?? null, linkedFrom: { boardId: c.boardId, boardName: cardBoardLabel(b), columnTitle: columnTitleOf.get(c.id) ?? null } },
+        ];
+      })
+    ),
+  };
 }

@@ -228,3 +228,20 @@ describe("KanbanCard with Tags, Priority, and Due Date", () => {
     expect(screen.getByText(dueDateText)).toBeInTheDocument();
   });
 });
+
+describe("KanbanCard assigned to someone else", () => {
+  const base: KanbanCardType = { id: "c", title: "T", notes: "", priority: "medium", createdAt: "2024-01-01", updatedAt: "2024-01-01" };
+  const handlers = { onEdit: vi.fn(), onDelete: vi.fn(), onGeneratePrompt: vi.fn() };
+  const renderCard = (card: KanbanCardType, currentUserId?: string) =>
+    render(<DndWrapper><KanbanCard card={card} {...handlers} currentUserId={currentUserId} /></DndWrapper>);
+
+  it("is dimmed when assigned to another person", () => {
+    const { container } = renderCard({ ...base, assigneeId: "luke" }, "brad");
+    expect(container.querySelector("[data-assigned-to-other]")).not.toBeNull();
+  });
+
+  it("is not dimmed when it's yours or unassigned", () => {
+    expect(renderCard({ ...base, assigneeId: "brad" }, "brad").container.querySelector("[data-assigned-to-other]")).toBeNull();
+    expect(renderCard(base, "brad").container.querySelector("[data-assigned-to-other]")).toBeNull();
+  });
+});

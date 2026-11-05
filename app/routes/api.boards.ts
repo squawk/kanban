@@ -4,12 +4,14 @@ import { eq } from "drizzle-orm";
 import { api, listAccessibleBoards, requireUser, resolveBoard } from "~/lib/access.server";
 import { json, jsonError, readJson } from "~/lib/http";
 import { logAudit } from "~/lib/audit.server";
+import { sharedBoardName } from "~/lib/linked-cards";
 
 // GET /api/boards - Boards the user owns or is a member of
 export const loader = api("list boards", async ({ request }: { request: Request }) => {
   const user = await requireUser(request);
   await resolveBoard(user); // ensure the user's own board exists
-  return json(await listAccessibleBoards(user.id));
+  const list = await listAccessibleBoards(user.id);
+  return json(list.map((b) => ({ ...b, displayName: b.role === "owner" ? b.name : sharedBoardName(b.name, b.ownerName) })));
 });
 
 // PATCH /api/boards - Rename a board (owner only). Body: { boardId, name }
