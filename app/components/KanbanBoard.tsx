@@ -17,9 +17,10 @@ import { ColumnDialog } from "./ColumnDialog";
 import { PromptDialog } from "./PromptDialog";
 import { ArchivedCardsDialog } from "./ArchivedCardsDialog";
 import { BoardMembersDialog } from "./BoardMembersDialog";
+import { AiQuickAddDialog } from "./AiQuickAddDialog";
 import { UserAvatar } from "./UserAvatar";
 import { Button } from "./ui/button";
-import { Archive, Undo2, Users, X } from "lucide-react";
+import { Archive, Sparkles, Undo2, Users, X } from "lucide-react";
 import type {
   KanbanCard as KanbanCardType,
   KanbanBoard as KanbanBoardType,
@@ -66,6 +67,7 @@ export function KanbanBoard({
   const [board, setBoard] = useState<KanbanBoardType>({ columns: [], cards: {} });
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("all");
   const [isMembersDialogOpen, setIsMembersDialogOpen] = useState(false);
+  const [isAiQuickAddOpen, setIsAiQuickAddOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeCard, setActiveCard] = useState<KanbanCardType | null>(null);
   const [isCardDialogOpen, setIsCardDialogOpen] = useState(false);
@@ -845,6 +847,10 @@ export function KanbanBoard({
                 </Button>
               </div>
             )}
+            <Button variant="outline" onClick={() => setIsAiQuickAddOpen(true)} data-testid="ai-quick-add-button">
+              <Sparkles className="h-4 w-4 mr-2" aria-hidden="true" />
+              Quick add
+            </Button>
             <Button
               variant="outline"
               onClick={() => setIsArchivedDialogOpen(true)}
@@ -925,6 +931,20 @@ export function KanbanBoard({
           </DragOverlay>
         </DndContext>
       </div>
+
+      <AiQuickAddDialog
+        open={isAiQuickAddOpen}
+        onOpenChange={setIsAiQuickAddOpen}
+        boardId={resolvedBoardId}
+        onCreated={async () => {
+          await fetchBoard();
+        }}
+        onOpenCard={(cardId) => {
+          setIsAiQuickAddOpen(false);
+          const card = board.cards[cardId];
+          if (card) handleEditCard(card);
+        }}
+      />
 
       <CardDialog
         open={isCardDialogOpen}
