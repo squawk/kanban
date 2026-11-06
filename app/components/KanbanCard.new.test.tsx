@@ -244,3 +244,24 @@ describe("KanbanCard assigned to someone else", () => {
     expect(renderCard(base, "brad").container.querySelector("[data-assigned-to-other]")).toBeNull();
   });
 });
+
+describe("KanbanCard click", () => {
+  it("opens the card when clicked", async () => {
+    const { default: userEventLib } = await import("@testing-library/user-event");
+    const onEdit = vi.fn();
+    const c = { id: "k1", title: "Click me", notes: "", priority: "medium" as const, createdAt: "", updatedAt: "" };
+    const { PointerSensor, useSensor, useSensors } = await import("@dnd-kit/core");
+    // Same as the board: a drag only starts after 8px of movement, so a click stays a click
+    function BoardDnd({ children }: { children: React.ReactNode }) {
+      const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+      return <DndContext sensors={sensors}>{children}</DndContext>;
+    }
+    render(
+      <BoardDnd>
+        <KanbanCard card={c} onEdit={onEdit} onDelete={vi.fn()} onGeneratePrompt={vi.fn()} />
+      </BoardDnd>
+    );
+    await userEventLib.setup().click(screen.getByText("Click me"));
+    expect(onEdit).toHaveBeenCalledWith(c);
+  });
+});
