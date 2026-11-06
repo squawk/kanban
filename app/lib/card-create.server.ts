@@ -14,6 +14,7 @@ import { logAudit } from "./audit.server";
 import { notifyCardAssigned } from "./notifications.server";
 import { recordInitialRevision } from "./card-update.server";
 import { cardRef } from "./card-privacy";
+import { requireAssignableClient } from "./clients.server";
 
 export const PRIORITIES = ["low", "medium", "high"] as const;
 
@@ -27,6 +28,8 @@ export interface NewCardInput {
   assigneeId?: string | null;
   /** Only the creator will see it; can't be combined with an assignee */
   isPrivate?: boolean;
+  /** Optional client (must exist and not be archived) */
+  clientId?: string | null;
 }
 
 /** Create a card; throws a JSON error `Response` on invalid input or missing access. */
@@ -39,6 +42,8 @@ export async function createCard(
   const { title, notes, columnId, dueDate, priority, tagIds } = input;
   const isPrivate = input.isPrivate === true;
   const assigneeId = isPrivate ? null : input.assigneeId;
+  if (input.clientId !== undefined && input.clientId !== null && typeof input.clientId !== "string") throw jsonError("Invalid clientId", 400);
+  const clientId = input.clientId ? (await requireAssignableClient(input.clientId)).id : null;
 
   if (!title || !columnId) throw jsonError("Title and columnId are required", 400);
   if (title.length > INPUT_LIMITS.cardTitle) throw jsonError(`Title must be ${INPUT_LIMITS.cardTitle} characters or less`, 400);
@@ -68,6 +73,7 @@ export async function createCard(
         assigneeId: assigneeId || null,
         createdById: user.id,
         isPrivate,
+        clientId,
         createdAt: now,
         updatedAt: now,
       });
@@ -100,6 +106,7 @@ export async function createCard(
       assigneeId: assigneeId || null,
       priority: newCard.priority,
       ...(isPrivate && { private: true }),
+      ...(clientId && { clientId }),
       ...(audit.via && { via: audit.via }),
     },
     request,

@@ -142,7 +142,7 @@ export function CommandPalette({ open, onOpenChange, boards, currentBoardId, act
       cardList = rankItems(
         cards.map((c) => ({
           ...c,
-          extra: [c.notes, c.boardName, c.columnTitle, c.assignee?.name, ...(c.tags ?? []).map((t) => t.name), c.isPrivate ? "private" : null],
+          extra: [c.notes, c.boardName, c.columnTitle, c.assignee?.name, c.client?.name, ...(c.tags ?? []).map((t) => t.name), c.isPrivate ? "private" : null],
         })),
         q,
         MAX_CARDS,
@@ -263,6 +263,12 @@ export function CommandPalette({ open, onOpenChange, boards, currentBoardId, act
                             <Highlighted text={row.card.title} query={q} />
                           </div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                            {row.card.client && (
+                              <span className="inline-flex items-center gap-1 font-medium text-foreground">
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: row.card.client.color }} aria-hidden="true" />
+                                <Highlighted text={row.card.client.name} query={q} />
+                              </span>
+                            )}
                             {row.card.boardName && <span className="truncate">{row.card.boardName}</span>}
                             {row.card.columnTitle && <span>· {row.card.columnTitle}</span>}
                             {row.card.dueDate && <DuePill dueDate={row.card.dueDate} />}
@@ -309,7 +315,7 @@ export function CommandPalette({ open, onOpenChange, boards, currentBoardId, act
               <kbd className="rounded border border-border px-1">↵</kbd> to open
             </span>
             <span className="ml-auto">
-              Search titles, notes, tags, boards, columns and people
+              Search titles, notes, clients, tags, boards and people
             </span>
           </div>
         </DialogPrimitive.Content>

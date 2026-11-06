@@ -50,6 +50,13 @@
       "when": 1793909053431,
       "tag": "0006_private_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793964113624,
+      "tag": "0007_clients",
+      "breakpoints": true
     }
   ]
 }

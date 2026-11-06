@@ -1,4 +1,5 @@
 import { api, getBoardParticipants, requireCardAccess, requireUser } from "~/lib/access.server";
+import { getClient } from "~/lib/clients.server";
 import { assertNotLockedByOther } from "~/lib/card-locks.server";
 import { getRevision, listRevisions, updateCard } from "~/lib/card-update.server";
 import { filterValidTagIds, serializeCards } from "~/lib/board-serialize.server";
@@ -34,6 +35,9 @@ export const action = api("restore card version", async ({ request, params }: Ar
   const participants = await getBoardParticipants(card.boardId);
   const assigneeStillMember = !target.assigneeId || participants.some((p) => p.id === target.assigneeId);
   const tagIds = await filterValidTagIds((JSON.parse(target.tags) as { id: string }[]).map((t) => t.id));
+  // The client may have been deleted since; archived is fine (it was on the card then)
+  const targetClient = target.client ? (JSON.parse(target.client) as { id: string }) : null;
+  const clientStillExists = !targetClient || !!(await getClient(targetClient.id));
 
   const { card: updated, revision, changes } = await updateCard({
     user,
@@ -48,6 +52,7 @@ export const action = api("restore card version", async ({ request, params }: Ar
       dueDate: target.dueDate,
       assigneeId: assigneeStillMember ? target.assigneeId : null,
       tagIds,
+      clientId: clientStillExists ? (targetClient?.id ?? null) : null,
     },
   });
 

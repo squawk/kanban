@@ -15,6 +15,7 @@ import { UserAvatar } from "./UserAvatar";
 import type { CardLockState } from "~/lib/use-card-lock";
 import { Lock } from "lucide-react";
 import { CardHistory } from "./CardHistory";
+import { ClientPicker } from "./ClientPicker";
 
 interface CardDialogProps {
   open: boolean;
@@ -28,6 +29,8 @@ interface CardDialogProps {
     assigneeId?: string | null;
     /** Sent only when this user may change it (new cards, or cards they created) */
     isPrivate?: boolean;
+    /** Sent only when it changed; null clears it */
+    clientId?: string | null;
   }) => void | boolean | Promise<void | boolean>;
   initialCard?: KanbanCard;
   cardId?: string;
@@ -84,6 +87,7 @@ export function CardDialog({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [assigneeId, setAssigneeId] = useState<string>("");
   const [isPrivate, setIsPrivate] = useState(false);
+  const [clientId, setClientId] = useState("");
   // Only the creator decides who sees a card (anyone can choose for a new one)
   const canChangePrivacy = !cardId || (!!currentUserId && initialCard?.createdBy?.id === currentUserId);
 
@@ -118,6 +122,7 @@ export function CardDialog({
       setSelectedTagIds(initialCard?.tags?.map(t => t.id) || []);
       setAssigneeId(initialCard?.assigneeId || "");
       setIsPrivate(!!initialCard?.isPrivate);
+      setClientId(initialCard?.clientId || "");
       setShowActivity(false);
       setActivity([]);
 
@@ -225,6 +230,7 @@ export function CardDialog({
         ...(members ? { assigneeId: isPrivate ? null : assigneeId || null } : {}),
         // Only when it changed (new cards start public)
         ...(canChangePrivacy && isPrivate !== !!initialCard?.isPrivate && { isPrivate }),
+        ...(clientId !== (initialCard?.clientId || "") && { clientId: clientId || null }),
       });
       setSaving(false);
       // A failed save (e.g. someone else holds the lock) keeps the dialog and your edits
@@ -240,6 +246,7 @@ export function CardDialog({
     setSelectedTagIds([]);
     setAssigneeId("");
     setIsPrivate(false);
+    setClientId("");
     setComments([]);
     setNewComment("");
     onOpenChange(false);
@@ -433,6 +440,9 @@ export function CardDialog({
               />
             </div>
           </div>
+
+          {/* Who the work is for (optional) */}
+          {open && <ClientPicker value={clientId} onChange={setClientId} current={initialCard?.client} disabled={readOnly} />}
 
           {/* Who can see it: only the creator can change this */}
           {canChangePrivacy && (

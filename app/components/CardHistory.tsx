@@ -13,6 +13,7 @@ export interface CardRevision {
   dueDate: string | null;
   assigneeId: string | null;
   tags: { id: string; name: string; color: string }[];
+  client?: { id: string; name: string; color: string } | null;
   changedFields: string[];
   actor: { id: string; name: string } | null;
   restoredFromVersion: number | null;
@@ -26,6 +27,7 @@ const FIELD_LABELS: Record<string, string> = {
   dueDate: "Due date",
   assigneeId: "Assignee",
   tags: "Tags",
+  client: "Client",
 };
 
 function when(iso: string) {
@@ -40,6 +42,8 @@ function display(field: string, r: CardRevision, members: BoardMember[]): string
       return r.assigneeId ? members.find((m) => m.id === r.assigneeId)?.name ?? "A former member" : "Unassigned";
     case "tags":
       return r.tags.length ? r.tags.map((t) => t.name).join(", ") : "None";
+    case "client":
+      return r.client?.name ?? "None";
     case "notes":
       return r.notes || "(empty)";
     default:

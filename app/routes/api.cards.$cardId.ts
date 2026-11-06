@@ -3,6 +3,7 @@ import { cards, columns } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { api, isBoardParticipant, requireCardAccess, requireUser } from "~/lib/access.server";
 import { cardRef } from "~/lib/card-privacy";
+import { requireAssignableClient } from "~/lib/clients.server";
 import { filterValidTagIds, serializeCards } from "~/lib/board-serialize.server";
 import { json, jsonError, readJson } from "~/lib/http";
 import { INPUT_LIMITS } from "~/lib/security";
@@ -34,6 +35,7 @@ export const action = api(
         tagIds?: unknown;
         assigneeId?: string | null;
         isPrivate?: boolean;
+        clientId?: string | null;
         expectedVersion?: number;
       }>(request);
       const { title, notes, generatedPrompt, dueDate, priority, tagIds, assigneeId, isPrivate } = body;
@@ -51,6 +53,9 @@ export const action = api(
       }
       if (priority !== undefined && !PRIORITIES.includes(priority)) return jsonError("Invalid priority", 400);
       if (isPrivate !== undefined && typeof isPrivate !== "boolean") return jsonError("Invalid isPrivate", 400);
+      if (body.clientId !== undefined && body.clientId !== null && typeof body.clientId !== "string") return jsonError("Invalid clientId", 400);
+      // Keeping an archived client the card already has is fine; picking one isn't
+      const clientId = body.clientId ? (await requireAssignableClient(body.clientId, card.clientId)).id : body.clientId;
       if (isPrivate !== undefined && isPrivate !== card.isPrivate && card.createdById !== user.id) {
         return jsonError("Only the person who created this card can change who sees it", 403);
       }
@@ -75,6 +80,7 @@ export const action = api(
           ...(priority !== undefined && { priority }),
           ...(assigneeId !== undefined && { assigneeId: assigneeId || null }),
           ...(isPrivate !== undefined && { isPrivate }),
+          ...(clientId !== undefined && { clientId: clientId || null }),
           ...(tagIds !== undefined && { tagIds: await filterValidTagIds(tagIds) }),
         },
       });
