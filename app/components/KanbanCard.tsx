@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { KanbanCard as KanbanCardType, UserSummary } from "~/lib/types";
@@ -29,6 +30,13 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy,
     transition,
     isDragging,
   } = useSortable({ id: card.id });
+
+  // Releasing a drag can fire a click on the same card: remember a drag happened since
+  // the last press so that click doesn't open the editor
+  const draggedSincePress = useRef(false);
+  useEffect(() => {
+    if (isDragging) draggedSincePress.current = true;
+  }, [isDragging]);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -87,9 +95,26 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy,
       data-spotlight={spotlight}
       {...attributes}
       {...listeners}
+      // A click opens the card (a drag needs 8px of movement first, so it never fires this);
+      // Enter does the same for keyboard users, since the card is focusable
+      onPointerDown={(e) => {
+        draggedSincePress.current = false;
+        listeners?.onPointerDown?.(e);
+      }}
+      onClick={() => {
+        if (draggedSincePress.current) {
+          draggedSincePress.current = false;
+          return;
+        }
+        onEdit(card);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && e.target === e.currentTarget) onEdit(card);
+        else listeners?.onKeyDown?.(e);
+      }}
     >
       <Card
-        className={`mb-2.5 rounded-xl cursor-grab active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 bg-card border-2 border-border border-l-[6px] ${getPriorityColor(card.priority)}`}
+        className={`mb-2.5 rounded-xl cursor-pointer active:cursor-grabbing transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 bg-card border-2 border-border border-l-[6px] ${getPriorityColor(card.priority)}`}
         style={
           spotlight === "match"
             ? {

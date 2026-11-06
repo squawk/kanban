@@ -30,6 +30,7 @@ import type {
 } from "~/lib/types";
 import { computeBoardPulse, type SpotlightKind } from "~/lib/board-pulse";
 import { BoardPulse } from "./BoardPulse";
+import { onBoardCommand, type BoardCommand } from "~/lib/board-commands";
 import { apiFetch } from "~/lib/api";
 import { COMBINED_BOARD_ID } from "~/lib/linked-cards";
 import { useCardLock } from "~/lib/use-card-lock";
@@ -783,6 +784,15 @@ export function KanbanBoard({
 
   // Default column titles that cannot be deleted
   const defaultColumnTitles = ["to do", "in progress", "completed"];
+
+  // Commands from the ⌘K palette (it lives in the page header, outside the board)
+  const commandHandler = useRef<(command: BoardCommand) => void>(() => {});
+  commandHandler.current = (command) => {
+    if (command.type === "quick-add") setIsAiQuickAddOpen(true);
+    else if (command.type === "spotlight") setSpotlight(command.kind);
+    else if (command.type === "new-card" && !isCombined && board.columns[0]) handleAddCard(board.columns[0].id);
+  };
+  useEffect(() => onBoardCommand((command) => commandHandler.current(command)), []);
 
   // Columns with the assignee filter applied; the pulse and the lanes both use these
   const visibleColumns = board.columns.map((column) => ({

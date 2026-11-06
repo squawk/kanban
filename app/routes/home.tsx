@@ -1,14 +1,31 @@
 import type { Route } from "./+types/home";
 import { COMBINED_BOARD_ID } from "~/lib/linked-cards";
 import { KanbanBoard } from "~/components/KanbanBoard";
+import { CommandPalette, type PaletteAction } from "~/components/CommandPalette";
+import { sendBoardCommand } from "~/lib/board-commands";
 import { MyTasksDialog } from "~/components/MyTasksDialog";
 import { AccountDialog } from "~/components/AccountDialog";
 import { UserAvatar } from "~/components/UserAvatar";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { Button } from "~/components/ui/button";
 import { useTheme } from "~/lib/theme";
-import { ListChecks, Palette, Shield } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUp,
+  CalendarClock,
+  EyeOff,
+  ListChecks,
+  LogOut,
+  Palette,
+  Plus,
+  Search,
+  Shield,
+  Sparkles,
+  UserRound,
+  Users,
+  X,
+} from "lucide-react";
 import type { BoardListItem, CurrentUser } from "~/lib/types";
 
 export function meta({}: Route.MetaArgs) {
@@ -26,6 +43,7 @@ export default function Home() {
   const [boards, setBoards] = useState<BoardListItem[]>([]);
   const [isMyTasksOpen, setIsMyTasksOpen] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
 
   const boardId = searchParams.get("boardId");
@@ -73,6 +91,51 @@ export default function Home() {
     navigate("/login");
   };
 
+  // ⌘K / Ctrl+K anywhere, or "/" when not typing, opens the command palette
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setIsPaletteOpen((open) => !open);
+      } else if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !document.querySelector("[role=dialog]")) {
+        e.preventDefault();
+        setIsPaletteOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  const onCombined = boardId === COMBINED_BOARD_ID;
+  const paletteActions = useMemo<PaletteAction[]>(() => {
+    const icon = (I: typeof Plus) => <I className="h-4 w-4" />;
+    return [
+      ...(!onCombined
+        ? [{ id: "new-card", title: "New card", icon: icon(Plus), keywords: ["create", "add", "task"], run: () => sendBoardCommand({ type: "new-card" }) }]
+        : []),
+      { id: "quick-add", title: "Quick add with AI", icon: icon(Sparkles), keywords: ["create", "sentence", "ai"], run: () => sendBoardCommand({ type: "quick-add" }) },
+      { id: "my-tasks", title: "My Tasks", icon: icon(ListChecks), keywords: ["assigned", "mine"], run: () => setIsMyTasksOpen(true) },
+      { id: "spot-overdue", title: "Spotlight overdue cards", icon: icon(AlertTriangle), keywords: ["late", "highlight", "filter"], run: () => sendBoardCommand({ type: "spotlight", kind: "overdue" }) },
+      { id: "spot-due", title: "Spotlight cards due this week", icon: icon(CalendarClock), keywords: ["soon", "highlight", "filter"], run: () => sendBoardCommand({ type: "spotlight", kind: "dueSoon" }) },
+      { id: "spot-high", title: "Spotlight high priority", icon: icon(ArrowUp), keywords: ["urgent", "highlight", "filter"], run: () => sendBoardCommand({ type: "spotlight", kind: "high" }) },
+      { id: "spot-mine", title: "Spotlight my cards", icon: icon(UserRound), keywords: ["mine", "assigned", "highlight", "filter"], run: () => sendBoardCommand({ type: "spotlight", kind: "mine" }) },
+      { id: "spot-private", title: "Spotlight private cards", icon: icon(EyeOff), keywords: ["hidden", "highlight", "filter"], run: () => sendBoardCommand({ type: "spotlight", kind: "private" }) },
+      { id: "spot-clear", title: "Clear spotlight", icon: icon(X), keywords: ["reset", "highlight"], run: () => sendBoardCommand({ type: "spotlight", kind: null }) },
+      ...(!onCombined
+        ? [{ id: "everyone", title: "Open the Everyone view", icon: icon(Users), keywords: ["all boards", "combined"], run: () => selectBoard(COMBINED_BOARD_ID) }]
+        : []),
+      { id: "theme", title: `Switch to ${theme === "modern" ? "Vintage" : "Modern"} theme`, icon: icon(Palette), keywords: ["dark", "light", "appearance", "color"], run: toggleTheme },
+      ...(user?.role === "admin"
+        ? [{ id: "admin", title: "Admin", icon: icon(Shield), keywords: ["users", "invite", "audit", "settings"], run: () => navigate("/admin") }]
+        : []),
+      { id: "account", title: "Account settings", icon: icon(UserRound), keywords: ["email", "notifications", "profile"], run: () => setIsAccountOpen(true) },
+      { id: "logout", title: "Log out", icon: icon(LogOut), keywords: ["sign out"], run: handleLogout },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onCombined, theme, user?.role, boards]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -114,6 +177,20 @@ export default function Home() {
             )}
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setIsPaletteOpen(true)}
+              className="group flex h-9 items-center gap-2 rounded-md border-2 border-border bg-background/60 px-2.5 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground sm:w-56 lg:w-72"
+              title={`Search cards, boards and actions (${isMac ? "⌘" : "Ctrl+"}K)`}
+              aria-label="Search cards, boards and actions"
+              data-testid="open-command-palette"
+            >
+              <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="hidden flex-1 text-left sm:inline">Search or jump to…</span>
+              <kbd className="hidden rounded border border-border bg-card px-1.5 py-0.5 text-[10px] font-medium sm:inline">
+                {isMac ? "⌘K" : "Ctrl K"}
+              </kbd>
+            </button>
             <Button onClick={() => setIsMyTasksOpen(true)} variant="outline" size="sm" className="gap-2" title="Cards assigned to me">
               <ListChecks className="h-4 w-4" />
               <span className="hidden sm:inline">My Tasks</span>
@@ -186,6 +263,16 @@ export default function Home() {
         open={isMyTasksOpen}
         onOpenChange={setIsMyTasksOpen}
         onOpenCard={(targetBoardId, cardId) => selectBoard(targetBoardId, cardId)}
+      />
+
+      <CommandPalette
+        open={isPaletteOpen}
+        onOpenChange={setIsPaletteOpen}
+        boards={boards}
+        currentBoardId={currentBoardId}
+        actions={paletteActions}
+        onOpenCard={(targetBoardId, cardId) => selectBoard(targetBoardId, cardId)}
+        onSelectBoard={(id) => selectBoard(id)}
       />
 
       <AccountDialog open={isAccountOpen} onOpenChange={setIsAccountOpen} user={user} onUserChange={setUser} />
