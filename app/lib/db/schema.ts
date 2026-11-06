@@ -216,12 +216,15 @@ export const dueReminders = pgTable(
   "due_reminders",
   {
     cardId: text("card_id").notNull().references(() => cards.id, { onDelete: "cascade" }),
-    kind: text("kind", { enum: ["due_soon", "overdue"] }).notNull(),
+    /** due_tomorrow | due_today | overdue (due_soon in rows from before they were split) */
+    kind: text("kind").notNull(),
     dueDay: text("due_day").notNull(), // YYYY-MM-DD
+    /** The local day (REMINDER_TIMEZONE) it was sent: one reminder per card per morning */
+    sentDay: text("sent_day").notNull(),
     userId: text("user_id").notNull(),
     sentAt: createdAt(),
   },
-  (t) => [primaryKey({ columns: [t.cardId, t.kind, t.dueDay] })]
+  (t) => [primaryKey({ columns: [t.cardId, t.dueDay, t.sentDay] })]
 );
 
 // Edit locks: a lease held by whoever has the card's edit dialog open. Expired rows

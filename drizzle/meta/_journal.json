@@ -57,6 +57,13 @@
       "when": 1793964113624,
       "tag": "0007_clients",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793984944402,
+      "tag": "0008_daily_reminders",
+      "breakpoints": true
     }
   ]
 }
