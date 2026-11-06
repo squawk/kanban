@@ -126,6 +126,16 @@ export function KanbanCard({ card, onEdit, onDelete, onGeneratePrompt, lockedBy,
         <CardHeader className={`p-3.5 ${hasFooter || card.notes ? "pb-2" : ""}`}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
+              {card.client && (
+                <p
+                  className="mb-1 inline-flex max-w-full items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  title={`Client: ${card.client.name}`}
+                  data-testid="card-client"
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: card.client.color }} aria-hidden="true" />
+                  <span className="truncate">{card.client.name}</span>
+                </p>
+              )}
               <CardTitle className="text-sm font-semibold text-foreground line-clamp-2">
                 {card.isPrivate && (
                   <span

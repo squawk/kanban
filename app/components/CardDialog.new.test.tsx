@@ -16,11 +16,11 @@ const mockTags: Tag[] = [
 describe("CardDialog with Tags, Priority, and Due Date", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock tags fetch
-    (global.fetch as any).mockResolvedValue({
+    // Tags for /api/tags; the client picker's /api/clients gets an empty list
+    (global.fetch as any).mockImplementation(async (url: string) => ({
       ok: true,
-      json: async () => mockTags,
-    });
+      json: async () => (String(url).startsWith("/api/clients") ? [] : mockTags),
+    }));
   });
 
   it("should load and display available tags", async () => {

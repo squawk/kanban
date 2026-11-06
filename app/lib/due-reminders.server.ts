@@ -1,12 +1,12 @@
 /**
- * Sends due-date reminder emails: one digest per person listing cards due
- * tomorrow/today and cards that just became overdue.
+ * Sends due-date reminder emails: one digest per person each morning listing cards
+ * due tomorrow, due today, and overdue (overdue ones every morning until they're done).
  *
  * Runs hourly from the Worker's Cron Trigger (see workers/app.ts and wrangler.jsonc)
  * and on demand via POST /api/cron/due-reminders. The due_reminders table makes it
  * idempotent, so overlapping runs never send the same reminder twice.
  */
-import { and, eq, gte, inArray, isNotNull, isNull, lte } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import { db } from "./db";
 import { boards, cards, columns, dueReminders, users } from "./db/schema";
 import { getAppUrl, getReminderConfig } from "./config";
@@ -17,12 +17,10 @@ import {
   groupByRecipient,
   localDayAndHour,
   planReminders,
+  reminderKey,
   type PlannedReminder,
   type ReminderCandidate,
 } from "./due-reminders";
-
-/** Don't email about cards that went overdue long ago (e.g. on the first deploy). */
-const OVERDUE_LOOKBACK_DAYS = 7;
 
 export interface ReminderRunResult {
   ran: boolean;
@@ -33,7 +31,7 @@ export interface ReminderRunResult {
 }
 
 async function loadCandidates(today: string): Promise<ReminderCandidate[]> {
-  const from = new Date(`${addDays(today, -OVERDUE_LOOKBACK_DAYS)}T00:00:00Z`);
+  // Everything due up to tomorrow: overdue cards keep coming until they're done
   const to = new Date(`${addDays(today, 1)}T00:00:00Z`);
 
   const rows = await db
@@ -50,7 +48,7 @@ async function loadCandidates(today: string): Promise<ReminderCandidate[]> {
     })
     .from(cards)
     .innerJoin(boards, eq(boards.id, cards.boardId))
-    .where(and(isNull(cards.archivedAt), isNotNull(cards.dueDate), gte(cards.dueDate, from), lte(cards.dueDate, to)));
+    .where(and(isNull(cards.archivedAt), isNotNull(cards.dueDate), lte(cards.dueDate, to)));
   if (rows.length === 0) return [];
 
   const columnRows = await db
@@ -81,9 +79,16 @@ function formatDay(day: string): string {
   });
 }
 
+function daysLate(dueDay: string, today: string): number {
+  return Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${dueDay}T00:00:00Z`)) / 86_400_000);
+}
+
 function dueText(r: PlannedReminder, today: string): string {
-  if (r.kind === "overdue") return `Overdue (was due ${formatDay(r.dueDay)})`;
-  return r.dueDay === today ? "Due today" : "Due tomorrow";
+  if (r.kind === "overdue") {
+    const late = daysLate(r.dueDay, today);
+    return `Overdue by ${late} day${late === 1 ? "" : "s"} (was due ${formatDay(r.dueDay)})`;
+  }
+  return r.kind === "due_today" ? "Due today" : "Due tomorrow";
 }
 
 function cardLink(r: PlannedReminder) {
@@ -92,17 +97,9 @@ function cardLink(r: PlannedReminder) {
 
 export function buildReminderEmail(name: string, items: PlannedReminder[], today: string) {
   const overdue = items.filter((i) => i.kind === "overdue");
-  const soon = items.filter((i) => i.kind === "due_soon");
-  const subject =
-    overdue.length && soon.length
-      ? `${overdue.length} overdue and ${soon.length} due soon on Kanban Board`
-      : overdue.length
-        ? overdue.length === 1
-          ? `Overdue: "${overdue[0].title}"`
-          : `${overdue.length} cards are overdue`
-        : soon.length === 1
-          ? `${dueText(soon[0], today)}: "${soon[0].title}"`
-          : `${soon.length} cards are due soon`;
+  const dueToday = items.filter((i) => i.kind === "due_today");
+  const dueTomorrow = items.filter((i) => i.kind === "due_tomorrow");
+  const subject = reminderSubject(overdue, dueToday, dueTomorrow, today);
 
   const section = (heading: string, list: PlannedReminder[], color: string) =>
     list.length === 0
@@ -128,16 +125,29 @@ export function buildReminderEmail(name: string, items: PlannedReminder[], today
 
   return {
     subject,
-    text: `Hi ${name},\n\n${textList("Overdue:", overdue)}${textList("Due soon:", soon)}${NOTIFICATION_FOOTER}`,
+    text: `Hi ${name},\n\n${textList("Overdue:", overdue)}${textList("Due today:", dueToday)}${textList("Due tomorrow:", dueTomorrow)}${NOTIFICATION_FOOTER}`,
     html: emailLayout({
-      heading: overdue.length ? "Cards need your attention" : "Coming up",
+      heading: overdue.length ? "Cards need your attention" : dueToday.length ? "Due today" : "Coming up",
       bodyHtml: `<p>Hi ${escapeHtml(name)},</p>
         ${section("Overdue", overdue, "#dc2626")}
-        ${section("Due soon", soon, "#2563eb")}`,
+        ${section("Due today", dueToday, "#d97706")}
+        ${section("Due tomorrow", dueTomorrow, "#2563eb")}`,
       cta: { label: "Open Kanban Board", url: getAppUrl() },
       footer: NOTIFICATION_FOOTER,
     }),
   };
+}
+
+/** e.g. "2 overdue, 3 due today", or "Due today: "Ship it"" for a single card */
+export function reminderSubject(overdue: PlannedReminder[], dueToday: PlannedReminder[], dueTomorrow: PlannedReminder[], today: string): string {
+  const all = [...overdue, ...dueToday, ...dueTomorrow];
+  if (all.length === 1) return `${dueText(all[0], today)}: "${all[0].title}"`.replace(/ \(was due [^)]*\)/, "");
+  const parts = [
+    overdue.length && `${overdue.length} overdue`,
+    dueToday.length && `${dueToday.length} due today`,
+    dueTomorrow.length && `${dueTomorrow.length} due tomorrow`,
+  ].filter(Boolean);
+  return `${parts.join(", ")} on Kanban Board`;
 }
 
 let running = false;
@@ -160,10 +170,10 @@ export async function runDueReminders(now = new Date(), opts: { ignoreHour?: boo
     if (candidates.length === 0) return { ...base, ran: true };
 
     const sent = await db
-      .select({ cardId: dueReminders.cardId, kind: dueReminders.kind, dueDay: dueReminders.dueDay })
+      .select({ cardId: dueReminders.cardId, dueDay: dueReminders.dueDay, sentDay: dueReminders.sentDay })
       .from(dueReminders)
-      .where(inArray(dueReminders.cardId, candidates.map((c) => c.cardId)));
-    const alreadySent = new Set(sent.map((s) => `${s.cardId}:${s.kind}:${s.dueDay}`));
+      .where(and(eq(dueReminders.sentDay, today), inArray(dueReminders.cardId, candidates.map((c) => c.cardId))));
+    const alreadySent = new Set(sent.map((s) => reminderKey(s.cardId, s.dueDay, s.sentDay)));
 
     const byRecipient = groupByRecipient(planReminders(candidates, today, alreadySent));
     if (byRecipient.size === 0) return { ...base, ran: true };
@@ -185,7 +195,7 @@ export async function runDueReminders(now = new Date(), opts: { ignoreHour?: boo
       for (const r of items) {
         const inserted = await db
           .insert(dueReminders)
-          .values({ cardId: r.cardId, kind: r.kind, dueDay: r.dueDay, userId, sentAt: new Date() })
+          .values({ cardId: r.cardId, kind: r.kind, dueDay: r.dueDay, sentDay: today, userId, sentAt: new Date() })
           .onConflictDoNothing()
           .returning({ cardId: dueReminders.cardId });
         if (inserted.length > 0) claimed.push(r);
@@ -198,7 +208,7 @@ export async function runDueReminders(now = new Date(), opts: { ignoreHour?: boo
         await db.transaction(async (tx) => {
           for (const r of claimed) {
             await tx.delete(dueReminders)
-              .where(and(eq(dueReminders.cardId, r.cardId), eq(dueReminders.kind, r.kind), eq(dueReminders.dueDay, r.dueDay)));
+              .where(and(eq(dueReminders.cardId, r.cardId), eq(dueReminders.dueDay, r.dueDay), eq(dueReminders.sentDay, today)));
           }
         });
         continue;

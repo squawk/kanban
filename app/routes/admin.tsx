@@ -3,15 +3,16 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { UserAvatar } from "~/components/UserAvatar";
+import { ClientsAdmin } from "~/components/ClientsAdmin";
 import { apiFetch } from "~/lib/api";
 import type { ActivityEntry, CurrentUser } from "~/lib/types";
-import { ArrowLeft, Check, Copy, Download, MailPlus, ScrollText, Settings, Users } from "lucide-react";
+import { ArrowLeft, Briefcase, Check, Copy, Download, MailPlus, ScrollText, Settings, Users } from "lucide-react";
 
 export function meta() {
   return [{ title: "Admin - Kanban Board" }];
 }
 
-type Tab = "users" | "invitations" | "signup" | "audit";
+type Tab = "users" | "invitations" | "signup" | "clients" | "audit";
 
 interface AdminUser {
   id: string;
@@ -632,6 +633,7 @@ const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: st
   { id: "users", label: "Users", icon: Users },
   { id: "invitations", label: "Invitations", icon: MailPlus },
   { id: "signup", label: "Sign-up", icon: Settings },
+  { id: "clients", label: "Clients", icon: Briefcase },
   { id: "audit", label: "Audit log", icon: ScrollText },
 ];
 
@@ -703,6 +705,7 @@ export default function AdminPage() {
           {tab === "users" && <UsersTab me={me} onPendingCount={setPendingCount} />}
           {tab === "invitations" && <InvitationsTab />}
           {tab === "signup" && <SignupTab />}
+          {tab === "clients" && <ClientsAdmin />}
           {tab === "audit" && <AuditTab />}
         </div>
       </main>

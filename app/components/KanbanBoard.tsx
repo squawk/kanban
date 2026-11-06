@@ -70,6 +70,8 @@ export function KanbanBoard({
 }: KanbanBoardProps = {}) {
   const [board, setBoard] = useState<KanbanBoardType>({ columns: [], cards: {} });
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("all");
+  /** "all", "none" (cards without a client) or a client id */
+  const [clientFilter, setClientFilter] = useState("all");
   const [spotlight, setSpotlight] = useState<SpotlightKind | null>(null);
   const [isMembersDialogOpen, setIsMembersDialogOpen] = useState(false);
   const [isAiQuickAddOpen, setIsAiQuickAddOpen] = useState(false);
@@ -112,6 +114,7 @@ export function KanbanBoard({
   useEffect(() => {
     setLoading(true);
     setAssigneeFilter("all");
+    setClientFilter("all");
     fetchBoard();
     fetchArchivedCount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -542,6 +545,7 @@ export function KanbanBoard({
     tagIds: string[];
     assigneeId?: string | null;
     isPrivate?: boolean;
+    clientId?: string | null;
   }): Promise<boolean> => {
     setSaveError(undefined);
     setSaveConflict(false);
@@ -559,6 +563,7 @@ export function KanbanBoard({
             tagIds: data.tagIds,
             ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId }),
             ...(data.isPrivate !== undefined && { isPrivate: data.isPrivate }),
+            ...(data.clientId !== undefined && { clientId: data.clientId }),
             // The version this editor loaded: the server refuses the save if someone saved since
             ...(editingCard.version !== undefined && { expectedVersion: editingCard.version }),
           }),
@@ -610,6 +615,7 @@ export function KanbanBoard({
             columnId: targetColumnId,
             ...(data.assigneeId && { assigneeId: data.assigneeId }),
             ...(data.isPrivate && { isPrivate: true }),
+            ...(data.clientId && { clientId: data.clientId }),
           }),
         });
 
@@ -794,12 +800,22 @@ export function KanbanBoard({
   };
   useEffect(() => onBoardCommand((command) => commandHandler.current(command)), []);
 
-  // Columns with the assignee filter applied; the pulse and the lanes both use these
+  // Clients that appear on this board, for the client filter
+  const boardClients = [
+    ...new Map(
+      Object.values(board.cards)
+        .filter((c) => c.client)
+        .map((c) => [c.client!.id, c.client!] as const)
+    ).values(),
+  ].sort((a, b) => a.name.localeCompare(b.name));
+
+  // Columns with the assignee and client filters applied; the pulse and the lanes both use these
   const visibleColumns = board.columns.map((column) => ({
     ...column,
     cardIds: column.cardIds.filter((id) => {
       const card = board.cards[id];
       if (!card) return false;
+      if (clientFilter === "none" ? !!card.clientId : clientFilter !== "all" && card.clientId !== clientFilter) return false;
       return assigneeFilter === "all"
         ? true
         : assigneeFilter === "mine"
@@ -906,6 +922,23 @@ export function KanbanBoard({
                   <option value="mine">Assigned to me</option>
                   <option value="unassigned">Unassigned</option>
                 </select>
+                {(boardClients.length > 0 || clientFilter !== "all") && (
+                  <select
+                    aria-label="Filter by client"
+                    value={clientFilter}
+                    onChange={(e) => setClientFilter(e.target.value)}
+                    className="h-9 max-w-[11rem] px-2 border-2 border-border rounded-md bg-card text-foreground text-sm"
+                    data-testid="client-filter"
+                  >
+                    <option value="all">All clients</option>
+                    {boardClients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                    <option value="none">No client</option>
+                  </select>
+                )}
                 {!isCombined && (
                   <Button variant="outline" onClick={() => setIsMembersDialogOpen(true)}>
                     <Users className="h-4 w-4 mr-2" />

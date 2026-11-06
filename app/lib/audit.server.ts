@@ -13,7 +13,7 @@ export interface AuditActor {
 export interface AuditEvent {
   actor?: AuditActor | null;
   action: string; // e.g. "card.created", "user.role_changed"
-  entityType: "user" | "card" | "column" | "board" | "comment" | "invitation" | "settings" | "auth" | "system";
+  entityType: "user" | "card" | "column" | "board" | "comment" | "invitation" | "settings" | "auth" | "system" | "client";
   entityId?: string | null;
   boardId?: string | null;
   summary: string;

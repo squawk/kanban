@@ -55,6 +55,14 @@ export interface Comment {
   updatedAt: string;
 }
 
+export interface ClientSummary {
+  id: string;
+  name: string;
+  color: string;
+  /** Archived clients stay on their cards but can't be picked for new ones */
+  archived: boolean;
+}
+
 export interface Tag {
   id: string;
   name: string;
@@ -77,6 +85,9 @@ export interface KanbanCard {
   assigneeId?: string | null;
   /** Only the creator can see it (and it can't be assigned) */
   isPrivate?: boolean;
+  /** Who the work is for (optional) */
+  clientId?: string | null;
+  client?: ClientSummary | null;
   assignee?: UserSummary | null;
   createdBy?: UserSummary | null;
   /** Latest edit-history version (0 = no history yet) */

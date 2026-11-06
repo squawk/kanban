@@ -10,6 +10,8 @@ export interface CardSnapshot {
   dueDate: Date | string | null | undefined;
   assigneeId?: string | null;
   tagIds?: string[];
+  /** The card's client (compared by id, recorded by name) */
+  client?: { id: string; name: string } | null;
 }
 
 export interface FieldChange {
@@ -37,6 +39,9 @@ export function diffCard(before: CardSnapshot, after: CardSnapshot): FieldChange
   if (bd !== ad) changes.push({ field: "dueDate", from: bd, to: ad });
   if ((before.assigneeId ?? null) !== (after.assigneeId ?? null)) {
     changes.push({ field: "assigneeId", from: before.assigneeId ?? null, to: after.assigneeId ?? null });
+  }
+  if (before.client !== undefined && after.client !== undefined && (before.client?.id ?? null) !== (after.client?.id ?? null)) {
+    changes.push({ field: "client", from: before.client?.name ?? null, to: after.client?.name ?? null });
   }
   if (before.tagIds && after.tagIds) {
     const b = [...before.tagIds].sort();

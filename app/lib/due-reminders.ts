@@ -5,7 +5,7 @@
  * comparisons are done on YYYY-MM-DD strings in the configured reminder time zone.
  */
 
-export type ReminderKind = "due_soon" | "overdue";
+export type ReminderKind = "due_tomorrow" | "due_today" | "overdue";
 
 /** Columns whose cards count as finished and never get reminders. */
 const DONE_COLUMN_TITLES = new Set(["completed", "complete", "done", "finished", "closed"]);
@@ -39,14 +39,24 @@ export function dueDayOf(dueDate: Date): string {
 }
 
 /**
- * Which reminder (if any) applies to a card due on `dueDay` when today is `today`:
- *  - due_soon: due tomorrow or today (catches up if the "tomorrow" run was missed)
- *  - overdue:  due date has passed
+ * Which reminder (if any) a card due on `dueDay` gets on the morning of `today`:
+ *  - due_tomorrow: the day before
+ *  - due_today:    the day itself (even if it was reminded the day before)
+ *  - overdue:      every morning after, until it's done, archived or rescheduled
  */
 export function reminderKindFor(dueDay: string, today: string): ReminderKind | null {
   if (dueDay < today) return "overdue";
-  if (dueDay === today || dueDay === addDays(today, 1)) return "due_soon";
+  if (dueDay === today) return "due_today";
+  if (dueDay === addDays(today, 1)) return "due_tomorrow";
   return null;
+}
+
+/**
+ * Dedupe key: at most one reminder per card, per due date, per morning. Changing the
+ * due date re-arms it; a second run the same morning sends nothing new.
+ */
+export function reminderKey(cardId: string, dueDay: string, sentDay: string): string {
+  return `${cardId}:${dueDay}:${sentDay}`;
 }
 
 export interface ReminderCandidate {
@@ -67,8 +77,8 @@ export interface PlannedReminder extends ReminderCandidate {
 }
 
 /**
- * Decide which reminders to send. `alreadySent` holds keys `${cardId}:${kind}:${dueDay}`.
- * Overdue cards only get an overdue reminder once; a card can't get both kinds in one run.
+ * Decide which reminders to send this morning. `alreadySent` holds `reminderKey`s of
+ * reminders already sent (only today's matter).
  */
 export function planReminders(
   candidates: ReminderCandidate[],
@@ -81,7 +91,7 @@ export function planReminders(
     const dueDay = dueDayOf(c.dueDate);
     const kind = reminderKindFor(dueDay, today);
     if (!kind) continue;
-    if (alreadySent.has(`${c.cardId}:${kind}:${dueDay}`)) continue;
+    if (alreadySent.has(reminderKey(c.cardId, dueDay, today))) continue;
     planned.push({ ...c, kind, dueDay });
   }
   return planned;

@@ -500,7 +500,7 @@ describe("due-date reminders", () => {
     expect(res).toMatchObject({ ran: false, reason: "too_early" });
   });
 
-  it("sends one digest per person, to the assignee or else the creator, exactly once", async () => {
+  it("sends one digest per person, to the assignee or else the creator, once per morning", async () => {
     await newCard("Assigned due tomorrow", "2026-11-06", helper.id);
     await newCard("Unassigned overdue", "2026-11-03");
     await newCard("Already done", "2026-11-06", undefined, done);
@@ -509,15 +509,47 @@ describe("due-date reminders", () => {
     sent.length = 0;
 
     const first = await m.reminders.runDueReminders(NOW);
-    expect(first).toMatchObject({ ran: true, emailsSent: 2, remindersSent: 2 });
+    // Overdue cards keep coming until they're done, however old
+    expect(first).toMatchObject({ ran: true, emailsSent: 2, remindersSent: 3 });
     const byTo = Object.fromEntries(sent.map((s) => [s.to as string, s.subject]));
     expect(byTo[helper.email]).toBe('Due tomorrow: "Assigned due tomorrow"');
-    expect(byTo[owner.email]).toBe('Overdue: "Unassigned overdue"');
+    expect(byTo[owner.email]).toBe("2 overdue on Kanban Board");
 
     sent.length = 0;
     const second = await m.reminders.runDueReminders(NOW);
     expect(second.remindersSent).toBe(0);
     expect(sent).toHaveLength(0);
+  });
+
+  it("reminds the day before, again on the day, and every morning while overdue until done", async () => {
+    // Its own assignee, so cards from the other tests don't land in the same digest
+    const quinn = await createActiveUser("quinn@acme.com", "Quinn");
+    await m.members.action({ request: req("/x", { method: "POST", cookie: ownerCookie, body: { userId: quinn.id } }), params: { boardId } });
+    const id = await newCard("Quarterly report", "2026-11-07", quinn.id);
+    const day = (d: string) => new Date(`${d}T16:30:00Z`); // 8:30 AM Pacific
+    const mineFor = async (d: string) => {
+      sent.length = 0;
+      await m.reminders.runDueReminders(day(d));
+      return sent.filter((s) => s.to === quinn.email).map((s) => s.subject as string);
+    };
+
+    expect(await mineFor("2026-11-06")).toEqual(['Due tomorrow: "Quarterly report"']);
+    // The morning it's due, even though it was reminded yesterday (the bug this fixes)
+    expect(await mineFor("2026-11-07")).toEqual(['Due today: "Quarterly report"']);
+    // A second run the same morning sends nothing new
+    expect(await mineFor("2026-11-07")).toEqual([]);
+    expect(await mineFor("2026-11-08")).toEqual(['Overdue by 1 day: "Quarterly report"']);
+    expect(await mineFor("2026-11-09")).toEqual(['Overdue by 2 days: "Quarterly report"']);
+
+    // Done: no more reminders
+    const layout = await body(await m.board.loader({ request: req("/api/board", { cookie: ownerCookie }) }));
+    const columns = layout.columns.map((c: { id: string; cardIds: string[] }) => ({
+      id: c.id,
+      cardIds: c.id === done ? [...c.cardIds, id] : c.cardIds.filter((x) => x !== id),
+    }));
+    await m.board.action({ request: req("/api/board", { method: "PUT", cookie: ownerCookie, body: { boardId, columns } }) });
+    await new Promise((r) => setTimeout(r, 50)); // let the (unrelated) "moved to Completed" email go out first
+    expect(await mineFor("2026-11-10")).toEqual([]);
   });
 
   it("re-arms when the due date changes and respects the opt-out", async () => {

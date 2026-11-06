@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addDays, groupByRecipient, isDoneColumn, localDayAndHour, planReminders, reminderKindFor } from "./due-reminders";
+import { addDays, groupByRecipient, isDoneColumn, localDayAndHour, planReminders, reminderKey, reminderKindFor } from "./due-reminders";
 
 const card = (id: string, due: string, extra: Partial<Parameters<typeof planReminders>[0][number]> = {}) => ({
   cardId: id,
@@ -26,8 +26,8 @@ describe("due reminder planning", () => {
   });
 
   it("classifies due dates", () => {
-    expect(reminderKindFor("2026-11-06", "2026-11-05")).toBe("due_soon");
-    expect(reminderKindFor("2026-11-05", "2026-11-05")).toBe("due_soon");
+    expect(reminderKindFor("2026-11-06", "2026-11-05")).toBe("due_tomorrow");
+    expect(reminderKindFor("2026-11-05", "2026-11-05")).toBe("due_today");
     expect(reminderKindFor("2026-11-04", "2026-11-05")).toBe("overdue");
     expect(reminderKindFor("2026-11-07", "2026-11-05")).toBeNull();
   });
@@ -48,12 +48,24 @@ describe("due reminder planning", () => {
         card("later", "2026-11-20"),
       ],
       "2026-11-05",
-      new Set(["sent:due_soon:2026-11-06"])
+      new Set([reminderKey("sent", "2026-11-06", "2026-11-05")])
     );
     expect(planned.map((p) => [p.cardId, p.kind])).toEqual([
-      ["tomorrow", "due_soon"],
+      ["tomorrow", "due_tomorrow"],
       ["late", "overdue"],
     ]);
+  });
+
+  it("reminds again on the due day and every morning while overdue", () => {
+    const c = [card("x", "2026-11-06")];
+    // Reminded yesterday ("due tomorrow"): still reminded today ("due today")
+    const yesterday = new Set([reminderKey("x", "2026-11-06", "2026-11-05")]);
+    expect(planReminders(c, "2026-11-06", yesterday).map((p) => p.kind)).toEqual(["due_today"]);
+    // Already sent this morning: nothing
+    expect(planReminders(c, "2026-11-06", new Set([reminderKey("x", "2026-11-06", "2026-11-06")]))).toEqual([]);
+    // Overdue: every morning, whatever was sent on earlier mornings
+    const earlier = new Set(["2026-11-07", "2026-11-08"].map((d) => reminderKey("x", "2026-11-06", d)));
+    expect(planReminders(c, "2026-11-09", earlier).map((p) => p.kind)).toEqual(["overdue"]);
   });
 
   it("groups by recipient, soonest first", () => {

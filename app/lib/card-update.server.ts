@@ -9,7 +9,7 @@
 import { and, desc, eq, lte, max } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db, firstRow, type Database } from "./db";
-import { cardRevisions, cards, cardTags, tags, users, type Card, type CardRevision } from "./db/schema";
+import { cardRevisions, cards, cardTags, clients, tags, users, type Card, type CardRevision } from "./db/schema";
 import { diffCard, type FieldChange } from "./card-diff";
 import { logAudit } from "./audit.server";
 import { notifyCardAssigned } from "./notifications.server";
@@ -31,6 +31,8 @@ export interface CardChanges {
   assigneeId?: string | null;
   /** Already validated tag ids */
   tagIds?: string[];
+  /** Already validated client id, or null to clear */
+  clientId?: string | null;
   generatedPrompt?: string;
   /** Only the creator may change this (checked by the caller); a private card is never assigned */
   isPrivate?: boolean;
@@ -43,6 +45,7 @@ interface Snapshot {
   dueDate: Date | null;
   assigneeId: string | null;
   tags: { id: string; name: string; color: string }[];
+  client: { id: string; name: string; color: string } | null;
 }
 
 async function tagsFor(tx: Tx, cardId: string) {
@@ -53,7 +56,18 @@ async function tagsFor(tx: Tx, cardId: string) {
     .where(eq(cardTags.cardId, cardId));
 }
 
-function snapshotOf(card: Card, cardTagRows: Snapshot["tags"]): Snapshot {
+async function clientFor(tx: Tx, clientId: string | null) {
+  if (!clientId) return null;
+  return (
+    (await tx
+      .select({ id: clients.id, name: clients.name, color: clients.color })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .then(firstRow)) ?? null
+  );
+}
+
+function snapshotOf(card: Card, cardTagRows: Snapshot["tags"], client: Snapshot["client"]): Snapshot {
   return {
     title: card.title,
     notes: card.notes,
@@ -61,6 +75,7 @@ function snapshotOf(card: Card, cardTagRows: Snapshot["tags"]): Snapshot {
     dueDate: card.dueDate ?? null,
     assigneeId: card.assigneeId ?? null,
     tags: [...cardTagRows].sort((a, b) => a.id.localeCompare(b.id)),
+    client,
   };
 }
 
@@ -81,6 +96,7 @@ async function insertRevision(
     dueDate: snap.dueDate,
     assigneeId: snap.assigneeId,
     tags: JSON.stringify(snap.tags),
+    client: snap.client ? JSON.stringify(snap.client) : null,
     changedFields: JSON.stringify(meta.changedFields),
     actorId: meta.actor?.id ?? null,
     actorName: meta.actor?.name ?? null,
@@ -91,7 +107,7 @@ async function insertRevision(
 
 /** Record version 1 for a newly created card (call inside the creating transaction). */
 export async function recordInitialRevision(tx: Tx, card: Card, actor: { id: string; name: string }) {
-  await insertRevision(tx, card.id, 1, snapshotOf(card, await tagsFor(tx, card.id)), {
+  await insertRevision(tx, card.id, 1, snapshotOf(card, await tagsFor(tx, card.id), await clientFor(tx, card.clientId)), {
     changedFields: [],
     actor,
     at: card.createdAt,
@@ -145,7 +161,7 @@ export async function updateCard(opts: {
       });
     }
 
-    const before = snapshotOf(current, await tagsFor(tx, card.id));
+    const before = snapshotOf(current, await tagsFor(tx, card.id), await clientFor(tx, current.clientId));
     // A private card can't be assigned, including by restoring a version that had an assignee
     const willBePrivate = changes.isPrivate ?? current.isPrivate;
 
@@ -159,6 +175,7 @@ export async function updateCard(opts: {
         ...(changes.priority !== undefined && { priority: changes.priority }),
         ...(changes.assigneeId !== undefined && { assigneeId: changes.assigneeId || null }),
         ...(changes.isPrivate !== undefined && { isPrivate: changes.isPrivate }),
+        ...(changes.clientId !== undefined && { clientId: changes.clientId }),
         ...(willBePrivate && { assigneeId: null }),
         updatedAt: now,
       })
@@ -170,7 +187,7 @@ export async function updateCard(opts: {
     }
 
     const updated = (await tx.select().from(cards).where(eq(cards.id, card.id)).then(firstRow))!;
-    const after = snapshotOf(updated, await tagsFor(tx, card.id));
+    const after = snapshotOf(updated, await tagsFor(tx, card.id), await clientFor(tx, updated.clientId));
     const fieldChanges = diffCard(
       { ...before, tagIds: before.tags.map((t) => t.id) },
       { ...after, tagIds: after.tags.map((t) => t.id) }
@@ -275,6 +292,7 @@ export function serializeRevision(r: CardRevision) {
     dueDate: r.dueDate ? r.dueDate.toISOString() : null,
     assigneeId: r.assigneeId,
     tags: JSON.parse(r.tags) as Snapshot["tags"],
+    client: r.client ? (JSON.parse(r.client) as NonNullable<Snapshot["client"]>) : null,
     changedFields: JSON.parse(r.changedFields) as string[],
     actor: r.actorId ? { id: r.actorId, name: r.actorName ?? "Unknown" } : null,
     restoredFromVersion: r.restoredFromVersion,

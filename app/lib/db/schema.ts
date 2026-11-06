@@ -1,4 +1,5 @@
 import { bigint, boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
 const createdAt = () => ts("created_at").notNull().defaultNow();
@@ -69,6 +70,23 @@ export const columns = pgTable(
   (t) => [index("idx_columns_board_id").on(t.boardId)]
 );
 
+/** Who a card's work is for (optional, one per card). Shared by everyone, like tags. */
+export const clients = pgTable(
+  "clients",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    color: text("color").notNull(),
+    /** Archived clients stay on their cards but aren't offered for new ones */
+    archivedAt: ts("archived_at"),
+    createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  // Names are unique ignoring case ("Acme" and "acme" are the same client)
+  (t) => [uniqueIndex("uq_clients_name_lower").on(sql`lower(${t.name})`)]
+);
+
 export const cards = pgTable(
   "cards",
   {
@@ -84,6 +102,7 @@ export const cards = pgTable(
     createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
     /** Only the creator can see a private card (it can't be assigned to anyone) */
     isPrivate: boolean("is_private").notNull().default(false),
+    clientId: text("client_id").references(() => clients.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -91,6 +110,7 @@ export const cards = pgTable(
     index("idx_cards_board_id").on(t.boardId),
     index("idx_cards_due_date").on(t.dueDate),
     index("idx_cards_assignee_id").on(t.assigneeId),
+    index("idx_cards_client_id").on(t.clientId),
   ]
 );
 
@@ -196,12 +216,15 @@ export const dueReminders = pgTable(
   "due_reminders",
   {
     cardId: text("card_id").notNull().references(() => cards.id, { onDelete: "cascade" }),
-    kind: text("kind", { enum: ["due_soon", "overdue"] }).notNull(),
+    /** due_tomorrow | due_today | overdue (due_soon in rows from before they were split) */
+    kind: text("kind").notNull(),
     dueDay: text("due_day").notNull(), // YYYY-MM-DD
+    /** The local day (REMINDER_TIMEZONE) it was sent: one reminder per card per morning */
+    sentDay: text("sent_day").notNull(),
     userId: text("user_id").notNull(),
     sentAt: createdAt(),
   },
-  (t) => [primaryKey({ columns: [t.cardId, t.kind, t.dueDay] })]
+  (t) => [primaryKey({ columns: [t.cardId, t.dueDay, t.sentDay] })]
 );
 
 // Edit locks: a lease held by whoever has the card's edit dialog open. Expired rows
@@ -233,6 +256,8 @@ export const cardRevisions = pgTable(
     assigneeId: text("assignee_id"),
     /** JSON: [{ id, name, color }] at the time of the revision */
     tags: text("tags").notNull().default("[]"),
+    /** JSON: { id, name, color } of the card's client at the time, or null */
+    client: text("client"),
     /** JSON: field names changed by this revision (empty for a baseline) */
     changedFields: text("changed_fields").notNull().default("[]"),
     actorId: text("actor_id"),
@@ -260,6 +285,7 @@ export type Column = typeof columns.$inferSelect;
 export type Card = typeof cards.$inferSelect;
 export type Comment = typeof comments.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
+export type Client = typeof clients.$inferSelect;
 export type CardTag = typeof cardTags.$inferSelect;
 export type Template = typeof templates.$inferSelect;
 export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;
